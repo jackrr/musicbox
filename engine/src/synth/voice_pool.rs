@@ -38,6 +38,8 @@ impl VoicePool {
                     tp.apply(param, value);
                 }
             }
+            // Other commands are handled at the AudioState level.
+            _ => {}
         }
     }
 
@@ -68,9 +70,9 @@ impl VoicePool {
         }
     }
 
-    // --- private ---
+    // --- note helpers (also called by sequencer) ---
 
-    fn note_on(&mut self, track_id: u8, pitch: u8, velocity: f32) {
+    pub fn note_on(&mut self, track_id: u8, pitch: u8, velocity: f32) {
         let ti = (track_id as usize).min(NUM_TRACKS - 1);
         let params = self.track_params[ti];
         self.voice_age += 1;
@@ -90,7 +92,7 @@ impl VoicePool {
         self.voices[idx].note_on(track_id, pitch, velocity, &params, age);
     }
 
-    fn note_off(&mut self, track_id: u8, pitch: u8) {
+    pub fn note_off(&mut self, track_id: u8, pitch: u8) {
         for voice in &mut self.voices {
             if voice.active && voice.track_id == track_id && voice.pitch == pitch {
                 voice.note_off();

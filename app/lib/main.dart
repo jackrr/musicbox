@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'engine/types.dart';
 import 'providers/engine_provider.dart';
-import 'ui/synth/keyboard.dart';
+import 'providers/project_provider.dart';
+import 'services/export_service.dart';
+import 'ui/ai/ai_page.dart';
+import 'ui/effects/effects_page.dart';
+import 'ui/sampler/sampler_page.dart';
+import 'ui/sequencer/sequencer_page.dart';
+import 'ui/settings/settings_page.dart';
+import 'ui/synth/synth_page.dart';
 
 void main() {
   runApp(const ProviderScope(child: MusicboxApp()));
@@ -16,183 +22,160 @@ class MusicboxApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'musicbox',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         scaffoldBackgroundColor: const Color(0xFF0D0D0D),
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.greenAccent,
+          surface: Color(0xFF111111),
+        ),
       ),
-      home: const SynthTestPage(),
+      home: const _RootPage(),
     );
   }
 }
 
-/// Phase 2 test screen — polyphonic synth with on-screen keyboard.
-class SynthTestPage extends ConsumerStatefulWidget {
-  const SynthTestPage({super.key});
+// ---------------------------------------------------------------------------
+// Root — bottom navigation with 5 tabs
+// ---------------------------------------------------------------------------
+
+class _RootPage extends ConsumerStatefulWidget {
+  const _RootPage();
 
   @override
-  ConsumerState<SynthTestPage> createState() => _SynthTestPageState();
+  ConsumerState<_RootPage> createState() => _RootPageState();
 }
 
-class _SynthTestPageState extends ConsumerState<SynthTestPage> {
-  static const _trackId = 0;
+class _RootPageState extends ConsumerState<_RootPage> {
+  int _tab = 0;
 
-  OscType _oscType = OscType.values.first;
-  double _cutoff    = 1.0;
-  double _resonance = 0.0;
-  double _attack    = 0.01;
-  double _release   = 0.4;
+  static const _pages = [
+    SequencerPage(),
+    SynthPage(),
+    SamplerPage(),
+    EffectsPage(),
+    AiPage(),
+  ];
 
-  void _setParam(VoiceParam param, double value) {
-    ref.read(engineProvider).setVoiceParam(_trackId, param, value);
-  }
+  static const _navItems = [
+    BottomNavigationBarItem(icon: Icon(Icons.grid_on),       label: 'SEQ'),
+    BottomNavigationBarItem(icon: Icon(Icons.piano),         label: 'SYNTH'),
+    BottomNavigationBarItem(icon: Icon(Icons.album),         label: 'SAMPLER'),
+    BottomNavigationBarItem(icon: Icon(Icons.tune),          label: 'FX'),
+    BottomNavigationBarItem(icon: Icon(Icons.auto_awesome),  label: 'AI'),
+  ];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        title: const Text(
-          'musicbox — synth',
-          style: TextStyle(letterSpacing: 2, fontWeight: FontWeight.w300, fontSize: 16),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ---- Oscillator selector ----
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: OscType.values.map((type) {
-                  final selected = type == _oscType;
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() => _oscType = type);
-                        _setParam(VoiceParam.oscType, type.index.toDouble());
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        margin: const EdgeInsets.all(3),
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: selected ? Colors.greenAccent : Colors.white12,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          type.name.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: selected ? Colors.black : Colors.white54,
-                            letterSpacing: 1,
-                          ),
-                        ),
+  Future<void> _exportDialog() async {
+    int bars = 4;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Export WAV', style: TextStyle(color: Colors.white)),
+        content: StatefulBuilder(
+          builder: (ctx, setState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('How many bars?',
+                style: TextStyle(color: Colors.white54, fontSize: 13)),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [4, 8, 16, 32].map((n) {
+                  final sel = n == bars;
+                  return GestureDetector(
+                    onTap: () => setState(() => bars = n),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 100),
+                      margin: const EdgeInsets.symmetric(horizontal: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: sel ? Colors.greenAccent : Colors.white12,
+                        borderRadius: BorderRadius.circular(6),
                       ),
+                      child: Text('$n',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: sel ? Colors.black : Colors.white54,
+                        )),
                     ),
                   );
                 }).toList(),
               ),
-            ),
-
-            // ---- Parameter sliders ----
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  _ParamSlider(
-                    label: 'CUTOFF',
-                    value: _cutoff,
-                    onChanged: (v) { setState(() => _cutoff = v); _setParam(VoiceParam.cutoff, v); },
-                  ),
-                  _ParamSlider(
-                    label: 'RESONANCE',
-                    value: _resonance,
-                    onChanged: (v) { setState(() => _resonance = v); _setParam(VoiceParam.resonance, v); },
-                  ),
-                  _ParamSlider(
-                    label: 'ATTACK',
-                    value: _attack,
-                    min: 0.001, max: 2.0,
-                    onChanged: (v) { setState(() => _attack = v); _setParam(VoiceParam.attack, v); },
-                  ),
-                  _ParamSlider(
-                    label: 'RELEASE',
-                    value: _release,
-                    min: 0.01, max: 4.0,
-                    onChanged: (v) { setState(() => _release = v); _setParam(VoiceParam.release, v); },
-                  ),
-                ],
-              ),
-            ),
-
-            const Spacer(),
-
-            // ---- Keyboard ----
-            const Padding(
-              padding: EdgeInsets.fromLTRB(0, 0, 0, 16),
-              child: KeyboardWidget(),
-            ),
-          ],
+            ],
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white38))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Export', style: TextStyle(color: Colors.greenAccent))),
+        ],
       ),
     );
+
+    if (ok != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Rendering…'), duration: Duration(seconds: 30)));
+
+    final engine  = ref.read(engineProvider);
+    final success = await ExportService.instance.export(engine, bars: bars);
+
+    messenger.hideCurrentSnackBar();
+    if (mounted) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(success ? 'Export shared!' : 'Export failed.'),
+      ));
+    }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Shared slider widget
-// ---------------------------------------------------------------------------
-
-class _ParamSlider extends StatelessWidget {
-  final String label;
-  final double value;
-  final double min;
-  final double max;
-  final ValueChanged<double> onChanged;
-
-  const _ParamSlider({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.min = 0.0,
-    this.max = 1.0,
-  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 80,
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 10, letterSpacing: 1, color: Colors.white54),
+    final projectAsync = ref.watch(projectProvider);
+    final projectName  = projectAsync.value?.name ?? 'musicbox';
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0D0D0D),
+        elevation: 0,
+        title: Text(
+          projectName.toLowerCase(),
+          style: const TextStyle(
+            fontSize: 16, letterSpacing: 3,
+            fontWeight: FontWeight.w300, color: Colors.white70,
           ),
         ),
-        Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 18),
-              activeTrackColor: Colors.greenAccent,
-              thumbColor: Colors.greenAccent,
-              inactiveTrackColor: Colors.white12,
-              overlayColor: Colors.greenAccent.withAlpha(40),
-            ),
-            child: Slider(value: value, min: min, max: max, onChanged: onChanged),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.file_upload_outlined, color: Colors.white54),
+            tooltip: 'Export WAV',
+            onPressed: _exportDialog,
           ),
-        ),
-        SizedBox(
-          width: 40,
-          child: Text(
-            value.toStringAsFixed(2),
-            style: const TextStyle(fontSize: 10, color: Colors.white38),
-            textAlign: TextAlign.right,
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Colors.white54),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const SettingsPage())),
           ),
-        ),
-      ],
+        ],
+      ),
+      body: IndexedStack(index: _tab, children: _pages),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _tab,
+        onTap: (i) => setState(() => _tab = i),
+        backgroundColor: const Color(0xFF111111),
+        selectedItemColor: Colors.greenAccent,
+        unselectedItemColor: Colors.white24,
+        selectedLabelStyle: const TextStyle(
+          fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1),
+        unselectedLabelStyle: const TextStyle(fontSize: 9, letterSpacing: 1),
+        type: BottomNavigationBarType.fixed,
+        items: _navItems,
+      ),
     );
   }
 }

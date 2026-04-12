@@ -6,11 +6,9 @@ import '../../providers/engine_provider.dart';
 /// One octave of piano keys (C3–B3, MIDI 48–59).
 ///
 /// Supports multi-touch: each pointer independently triggers note on/off.
-/// Track 0 with default synth settings.
 class KeyboardWidget extends HookConsumerWidget {
-  const KeyboardWidget({super.key});
-
-  static const int _trackId = 0;
+  final int trackId;
+  const KeyboardWidget({super.key, this.trackId = 0});
 
   static const _keys = [
     _KeyDef(48, 'C',  false),
@@ -54,25 +52,25 @@ class KeyboardWidget extends HookConsumerWidget {
               final key = _keyAt(e.localPosition, rects);
               if (key != null && !heldNotes.containsKey(e.pointer)) {
                 heldNotes[e.pointer] = key.pitch;
-                engine.noteOn(_trackId, key.pitch, 100);
+                engine.noteOn(trackId, key.pitch, 100);
               }
             },
             onPointerMove: (e) {
               final key = _keyAt(e.localPosition, rects);
               final prev = heldNotes[e.pointer];
               if (key != null && key.pitch != prev) {
-                if (prev != null) engine.noteOff(_trackId, prev);
+                if (prev != null) engine.noteOff(trackId, prev);
                 heldNotes[e.pointer] = key.pitch;
-                engine.noteOn(_trackId, key.pitch, 100);
+                engine.noteOn(trackId, key.pitch, 100);
               }
             },
             onPointerUp: (e) {
               final pitch = heldNotes.remove(e.pointer);
-              if (pitch != null) engine.noteOff(_trackId, pitch);
+              if (pitch != null) engine.noteOff(trackId, pitch);
             },
             onPointerCancel: (e) {
               final pitch = heldNotes.remove(e.pointer);
-              if (pitch != null) engine.noteOff(_trackId, pitch);
+              if (pitch != null) engine.noteOff(trackId, pitch);
             },
             child: Stack(
               children: [

@@ -1,4 +1,8 @@
+import 'dart:convert';
 import 'dart:ffi';
+import 'dart:isolate';
+
+import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
 import 'types.dart';
@@ -9,7 +13,7 @@ export 'types.dart';
 ///
 /// Lifecycle:
 ///   1. Call [init] once (typically inside a Riverpod provider).
-///   2. Use [noteOn] / [noteOff] / [setVoiceParam] to drive synthesis.
+///   2. Use the typed command methods to drive synthesis/sequencer.
 ///   3. Call [dispose] on shutdown.
 class AudioEngine {
   static final _bindings = EngineBindings();
@@ -22,8 +26,7 @@ class AudioEngine {
     _ptr = _bindings.create();
     if (_ptr == nullptr) {
       throw StateError(
-        'musicbox_engine_create returned null — check audio permissions.',
-      );
+          'musicbox_engine_create returned null — check audio permissions.');
     }
     _initialized = true;
   }
@@ -35,19 +38,89 @@ class AudioEngine {
     _initialized = false;
   }
 
-  // --- Synthesis control -------------------------------------------------------
+  // --- Synthesis ---------------------------------------------------------------
 
-  /// Trigger a note. [velocity] is 0–127.
   void noteOn(int trackId, int pitch, int velocity) =>
       _send(0, trackId, pitch, velocity.clamp(0, 127), 0.0);
 
-  /// Release a note.
   void noteOff(int trackId, int pitch) =>
       _send(1, trackId, pitch, 0, 0.0);
 
-  /// Set a voice parameter on [trackId].
   void setVoiceParam(int trackId, VoiceParam param, double value) =>
       _send(2, trackId, param.index, 0, value);
+
+  // --- Sequencer ---------------------------------------------------------------
+
+  void setBpm(double bpm) =>
+      _send(3, 0, 0, 0, bpm);
+
+  void setTransport(TransportState state) =>
+      _send(4, 0, state.index, 0, 0.0);
+
+  /// Set a step. Pass [active]=false to clear it.
+  void setStep(int trackId, int stepIdx, {
+    bool active = true,
+    int pitch = 60,
+    double velocity = 0.8,
+  }) {
+    _send(5, trackId, stepIdx, pitch, active ? velocity : 0.0);
+  }
+
+  void setEffect(int trackId, EffectParam param, double value) =>
+      _send(6, trackId, param.index, 0, value);
+
+  void setNumSteps(int n) =>
+      _send(7, 0, n, 0, 0.0);
+
+  // --- Playhead ----------------------------------------------------------------
+
+  /// Current sequencer step (0..numSteps-1), or -1 when stopped.
+  int getPlayhead() {
+    _requireInitialized();
+    return _bindings.getPlayhead(_ptr);
+  }
+
+  // --- Sampler -----------------------------------------------------------------
+
+  /// Load a WAV file at [path] into [trackId]. Returns false on failure.
+  bool loadSample(int trackId, String path) {
+    _requireInitialized();
+    final bytes = utf8.encode(path);
+    final ptr = malloc.allocate<Uint8>(bytes.length);
+    try {
+      ptr.asTypedList(bytes.length).setAll(0, bytes);
+      return _bindings.loadSample(_ptr, trackId, ptr, bytes.length);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  // --- Export ------------------------------------------------------------------
+
+  /// Render [bars] bars to a WAV file at [path]. Blocks — call from an isolate.
+  Future<bool> exportWav(String path, int bars) async {
+    _requireInitialized();
+    // Capture what we need before spawning the isolate
+    final ptrAddr = _ptr.address;
+    final result = await Isolate.run(() {
+      final ptr = Pointer<Void>.fromAddress(ptrAddr);
+      final bytes = utf8.encode(path);
+      final pathPtr = malloc.allocate<Uint8>(bytes.length);
+      try {
+        pathPtr.asTypedList(bytes.length).setAll(0, bytes);
+        return EngineBindings().exportWav(ptr, pathPtr, bytes.length, bars);
+      } finally {
+        malloc.free(pathPtr);
+      }
+    });
+    return result;
+  }
+
+  /// Export progress 0–100 (poll while exportWav is running).
+  int exportProgress() {
+    _requireInitialized();
+    return _bindings.exportProgress(_ptr);
+  }
 
   // --- Private -----------------------------------------------------------------
 
