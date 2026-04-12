@@ -1,81 +1,84 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 
-/// Wraps a live cpal output stream.
-///
-/// Dropping this struct stops and releases the audio stream.
+use crate::commands::FfiCommand;
+use crate::synth::VoicePool;
+
+/// Maximum frames per callback × channels.
+/// Pre-allocated once; no heap use inside the audio callback.
+const MAX_OUTPUT_SAMPLES: usize = 8192 * 2;
+
+/// Wraps a live cpal output stream. Dropping stops audio.
 pub struct AudioStream {
     _stream: cpal::Stream,
 }
 
 impl AudioStream {
-    pub fn new(is_playing: Arc<AtomicBool>) -> Result<Self, Box<dyn std::error::Error>> {
-        let host = cpal::default_host();
-
+    pub fn new(command_rx: rtrb::Consumer<FfiCommand>) -> Result<Self, Box<dyn std::error::Error>> {
+        let host   = cpal::default_host();
         let device = host
             .default_output_device()
-            .ok_or("no default audio output device found")?;
+            .ok_or("no default audio output device")?;
 
         let supported = device.default_output_config()?;
         let sample_rate = supported.sample_rate().0 as f64;
-        let channels = supported.channels() as usize;
+        let channels    = supported.channels() as usize;
+
+        let voice_pool = VoicePool::new(sample_rate);
 
         let stream = match supported.sample_format() {
             cpal::SampleFormat::F32 => {
-                build_stream::<f32>(&device, &supported.into(), sample_rate, channels, is_playing)?
+                build_stream::<f32>(&device, &supported.into(), channels, voice_pool, command_rx)?
             }
             cpal::SampleFormat::I16 => {
-                build_stream::<i16>(&device, &supported.into(), sample_rate, channels, is_playing)?
+                build_stream::<i16>(&device, &supported.into(), channels, voice_pool, command_rx)?
             }
             cpal::SampleFormat::U16 => {
-                build_stream::<u16>(&device, &supported.into(), sample_rate, channels, is_playing)?
+                build_stream::<u16>(&device, &supported.into(), channels, voice_pool, command_rx)?
             }
             fmt => return Err(format!("unsupported sample format: {fmt:?}").into()),
         };
 
         stream.play()?;
-
         Ok(Self { _stream: stream })
     }
 }
 
-/// Build a typed output stream that renders a 440 Hz sine wave when playing.
 fn build_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    sample_rate: f64,
     channels: usize,
-    is_playing: Arc<AtomicBool>,
+    mut voice_pool: VoicePool,
+    mut command_rx: rtrb::Consumer<FfiCommand>,
 ) -> Result<cpal::Stream, Box<dyn std::error::Error>>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
-    // Phase accumulator for the test tone (440 Hz).
-    let mut phase: f64 = 0.0;
-    let phase_inc = 440.0 / sample_rate;
+    // Pre-allocate f32 output buffer — reused every callback, zero heap in hot path.
+    let mut f32_buf = vec![0.0f32; MAX_OUTPUT_SAMPLES];
 
     let stream = device.build_output_stream(
         config,
-        move |output: &mut [T], _info: &cpal::OutputCallbackInfo| {
-            for frame in output.chunks_mut(channels) {
-                let sample: f32 = if is_playing.load(Ordering::Relaxed) {
-                    let s = (phase * std::f64::consts::TAU).sin() as f32 * 0.25;
-                    phase = (phase + phase_inc).fract();
-                    s
-                } else {
-                    0.0
-                };
-                let value = T::from_sample(sample);
-                for out in frame.iter_mut() {
-                    *out = value;
+        move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
+            let n_frames = output.len() / channels;
+
+            // Drain pending commands (rtrb pop never allocates).
+            while let Ok(cmd) = command_rx.pop() {
+                if let Some(decoded) = cmd.decode() {
+                    voice_pool.handle(decoded);
                 }
             }
+
+            // Render voices → f32_buf, then convert to device sample type.
+            let buf = &mut f32_buf[..output.len()];
+            buf.fill(0.0);
+            voice_pool.render(buf, n_frames, channels);
+
+            for (out, &s) in output.iter_mut().zip(buf.iter()) {
+                *out = T::from_sample(s);
+            }
         },
-        |err| eprintln!("[musicbox] stream error: {err}"),
-        None, // no timeout
+        |err| eprintln!("[musicbox] audio error: {err}"),
+        None,
     )?;
 
     Ok(stream)

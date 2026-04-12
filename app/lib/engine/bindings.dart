@@ -9,12 +9,16 @@ typedef _CreateDart = Pointer<Void> Function();
 typedef _VoidPtrNative = Void Function(Pointer<Void>);
 typedef _VoidPtrDart = void Function(Pointer<Void>);
 
+typedef _SendCmdNative = Bool Function(
+    Pointer<Void>, Uint8, Uint8, Uint8, Uint8, Float);
+typedef _SendCmdDart = bool Function(
+    Pointer<Void>, int, int, int, int, double);
+
 // --- EngineBindings ------------------------------------------------------------
 
 /// Raw FFI bindings to the Rust engine shared library.
 ///
-/// This class is intentionally low-level. Use [AudioEngine] for all
-/// application code.
+/// Low-level. Use [AudioEngine] for all application code.
 class EngineBindings {
   final DynamicLibrary _lib;
 
@@ -22,6 +26,8 @@ class EngineBindings {
   late final void Function(Pointer<Void>) destroy;
   late final void Function(Pointer<Void>) start;
   late final void Function(Pointer<Void>) stop;
+  late final bool Function(Pointer<Void>, int, int, int, int, double)
+      sendCommand;
 
   EngineBindings() : _lib = _openLibrary() {
     create = _lib.lookupFunction<_CreateNative, _CreateDart>(
@@ -36,6 +42,9 @@ class EngineBindings {
     stop = _lib.lookupFunction<_VoidPtrNative, _VoidPtrDart>(
       'musicbox_engine_stop',
     );
+    sendCommand = _lib.lookupFunction<_SendCmdNative, _SendCmdDart>(
+      'musicbox_engine_send_command',
+    );
   }
 
   static DynamicLibrary _openLibrary() {
@@ -43,7 +52,6 @@ class EngineBindings {
       return DynamicLibrary.open('libmusicbox_engine.so');
     }
     if (Platform.isIOS) {
-      // Static lib is linked directly into the process on iOS.
       return DynamicLibrary.process();
     }
     throw UnsupportedError(
