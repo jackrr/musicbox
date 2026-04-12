@@ -1,0 +1,43 @@
+# Rust
+engine/target/
+engine/Cargo.lock
+
+# Flutter
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/build/
+app/pubspec.lock
+app/.idea/
+app/*.iml
+app/android/.gradle/
+app/android/local.properties
+app/android/GeneratedPluginRegistrant.java
+app/ios/.symlinks/
+app/ios/Pods/
+app/ios/Flutter/App.framework
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/ephemeral/
+app/ios/Runner/GeneratedPluginRegistrant.*
+
+# Generated Dart files (keep — committed for reproducibility)
+# app/lib/**/*.g.dart  <- do NOT ignore, commit generated files
+
+# macOS / Linux / Windows IDE
+.DS_Store
+.idea/
+*.swp
+*.swo
+*~
+
+# VSCode (keep settings, ignore workspace)
+.vscode/*.code-workspace
+
+# Android jniLibs (built by build_android.sh — do NOT commit large binaries)
+app/android/app/src/main/jniLibs/
+
+# iOS static lib (built by build_ios.sh)
+app/ios/libmusicbox_engine.a

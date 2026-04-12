@@ -1,0 +1,46 @@
+name: musicbox
+description: "Offline-first mobile music-making app."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  hooks_riverpod: ^2.6.1
+  flutter_hooks: ^0.21.2
+
+  # Data models
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # Storage & files
+  path_provider: ^2.1.5
+  file_picker: ^8.3.7
+  flutter_secure_storage: ^9.2.4
+
+  # Networking (Claude API)
+  http: ^1.3.0
+
+  # Export / share
+  share_plus: ^10.1.4
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.15
+  riverpod_generator: ^2.6.3
+  freezed: ^2.5.8
+  json_serializable: ^6.9.5
+
+flutter:
+  uses-material-design: true
