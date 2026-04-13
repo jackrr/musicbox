@@ -41,3 +41,6 @@ app/android/app/src/main/jniLibs/
 
 # iOS static lib (built by build_ios.sh)
 app/ios/libmusicbox_engine.a
+
+*.keystore
+**/key.properties
