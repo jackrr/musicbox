@@ -24,4 +24,24 @@ cargo ndk \
   -o "$OUTPUT_DIR" \
   build $BUILD_TYPE
 
+# Bundle libc++_shared.so — required by oboe (cpal's Android audio backend).
+# cargo-ndk doesn't always copy it automatically; do it explicitly here.
+NDK_HOST="linux-x86_64"
+NDK_PREBUILT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${NDK_HOST}"
+
+copy_libcpp() {
+  local ABI="$1"
+  local TRIPLE="$2"
+  local SRC="${NDK_PREBUILT}/sysroot/usr/lib/${TRIPLE}/libc++_shared.so"
+  if [[ -f "$SRC" ]]; then
+    cp "$SRC" "${OUTPUT_DIR}/${ABI}/libc++_shared.so"
+    echo "  Copied libc++_shared.so → ${ABI}"
+  else
+    echo "  WARNING: libc++_shared.so not found at $SRC"
+  fi
+}
+
+copy_libcpp arm64-v8a   aarch64-linux-android
+copy_libcpp armeabi-v7a arm-linux-androideabi
+
 echo "Done. Libraries written to $OUTPUT_DIR"

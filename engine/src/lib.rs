@@ -6,6 +6,28 @@ mod sampler;
 mod sequencer;
 mod synth;
 
+// ---------------------------------------------------------------------------
+// Android: initialise the JNI/NDK context that cpal's oboe backend requires.
+// Called automatically by the Android runtime when the .so is loaded.
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "android")]
+#[allow(non_snake_case)]
+#[no_mangle]
+pub unsafe extern "C" fn JNI_OnLoad(
+    vm: jni::JavaVM,
+    _: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    // Provide the JavaVM to cpal's oboe/AAudio backend via ndk-context.
+    // The activity pointer can be null here; oboe only needs it for audio
+    // focus which we don't use.
+    ndk_context::initialize_android_context(
+        vm.get_java_vm_pointer().cast(),
+        std::ptr::null_mut(),
+    );
+    jni::sys::JNI_VERSION_1_6
+}
+
 use std::sync::{
     atomic::{AtomicI32, AtomicU32, Ordering},
     mpsc, Arc,
