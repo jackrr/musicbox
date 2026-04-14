@@ -100,12 +100,20 @@ class SequencerNotifier extends StateNotifier<SequencerState> {
       engine.setSampleParam(ti, SampleParam.basePitch,    sp.basePitch.toDouble());
       engine.setSampleParam(ti, SampleParam.playbackRate, sp.playbackRate);
 
-      // Reload sample audio if the path changed (e.g. on startup from saved project).
+      // Reload sample audio if the path changed (e.g. on startup from saved
+      // project).  Deferred via microtask so the blocking WAV decode doesn't
+      // run inside Riverpod's synchronous state-propagation chain — calling
+      // a heavy FFI there triggers a SIGTRAP on Flutter's native side.
       final path = track.samplePath;
       if (path != null && path != _loadedSamplePaths[ti]) {
-        if (engine.loadSample(ti, path)) {
-          _loadedSamplePaths[ti] = path;
-        }
+        _loadedSamplePaths[ti] = path; // mark now to prevent duplicate loads
+        final capturedTi   = ti;
+        final capturedPath = path;
+        Future.microtask(() {
+          if (!engine.loadSample(capturedTi, capturedPath)) {
+            _loadedSamplePaths[capturedTi] = null; // allow retry on next sync
+          }
+        });
       }
     }
     state = state.copyWith(bpm: p.bpm, numSteps: p.numSteps);
