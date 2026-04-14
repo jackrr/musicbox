@@ -65,6 +65,10 @@ pub struct Engine {
 
     // Microphone recorder (None when not recording)
     recorder: Option<Recorder>,
+
+    // Cached decoded sample data for waveform peak extraction (Flutter-side only).
+    // Shared with the audio thread via Arc; never mutated after load.
+    sample_data: Vec<Option<Arc<Vec<f32>>>>,
 }
 
 impl Engine {
@@ -86,6 +90,7 @@ impl Engine {
             track_params: Box::new(std::array::from_fn(|_| TrackParams::default())),
             export_progress: Arc::new(AtomicU32::new(0)),
             recorder: None,
+            sample_data: vec![None; NUM_TRACKS],
         })
     }
 
@@ -178,14 +183,19 @@ pub unsafe extern "C" fn musicbox_engine_load_sample(
     let path = match std::str::from_utf8(std::slice::from_raw_parts(path_ptr, path_len)) {
         Ok(s) => s, Err(_) => return false,
     };
+    let e = &mut *ptr;
     match load_wav(path) {
         Ok((data, rate)) => {
-            let _ = (*ptr).sample_tx.send(SampleMsg {
-                track_id, data: std::sync::Arc::new(data), source_rate: rate as f32,
+            let arc = std::sync::Arc::new(data);
+            if (track_id as usize) < e.sample_data.len() {
+                e.sample_data[track_id as usize] = Some(Arc::clone(&arc));
+            }
+            let _ = e.sample_tx.send(SampleMsg {
+                track_id, data: arc, source_rate: rate as f32,
             });
             true
         }
-        Err(e) => { eprintln!("[musicbox] load_sample: {e}"); false }
+        Err(err) => { eprintln!("[musicbox] load_sample: {err}"); false }
     }
 }
 
@@ -260,6 +270,58 @@ pub unsafe extern "C" fn musicbox_engine_stop_recording(
         Ok(()) => true,
         Err(err) => { eprintln!("[musicbox] stop_recording: {err}"); false }
     }
+}
+
+/// Returns true if a sample is currently loaded for the given track.
+///
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_has_sample(ptr: *const Engine, track_id: u8) -> bool {
+    if ptr.is_null() { return false; }
+    let e = &*ptr;
+    e.sample_data
+        .get(track_id as usize)
+        .map(|s| s.is_some())
+        .unwrap_or(false)
+}
+
+/// Write up to `num_peaks` (min, max) pairs into `out_ptr` for waveform display.
+/// Layout: [min0, max0, min1, max1, …] (2 * num_peaks floats total).
+/// Returns the actual number of pairs written (0 if no sample is loaded for that track).
+///
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_get_sample_peaks(
+    ptr: *const Engine,
+    track_id: u8,
+    out_ptr: *mut f32,
+    num_peaks: usize,
+) -> u32 {
+    if ptr.is_null() || out_ptr.is_null() || num_peaks == 0 { return 0; }
+    let e = &*ptr;
+    let idx = track_id as usize;
+    let data = match e.sample_data.get(idx).and_then(|d| d.as_ref()) {
+        Some(d) => d,
+        None => return 0,
+    };
+    if data.is_empty() { return 0; }
+
+    let out = std::slice::from_raw_parts_mut(out_ptr, num_peaks * 2);
+    let step = data.len() as f64 / num_peaks as f64;
+
+    for i in 0..num_peaks {
+        let start = (i as f64 * step) as usize;
+        let end   = ((i as f64 + 1.0) * step) as usize;
+        let end   = end.min(data.len());
+        let chunk = &data[start..end.max(start + 1).min(data.len())];
+        let (mn, mx) = chunk.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &s| {
+            (lo.min(s), hi.max(s))
+        });
+        out[i * 2]     = if mn == f32::MAX { 0.0 } else { mn };
+        out[i * 2 + 1] = if mx == f32::MIN { 0.0 } else { mx };
+    }
+
+    num_peaks as u32
 }
 
 /// No-op stubs (transport handled via send_command kind=4).

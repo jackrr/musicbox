@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -84,6 +85,31 @@ class AudioEngine {
   }
 
   // --- Sampler -----------------------------------------------------------------
+
+  /// Returns true if a sample is currently loaded in the engine for [trackId].
+  bool hasSample(int trackId) {
+    _requireInitialized();
+    return _bindings.hasSample(_ptr, trackId);
+  }
+
+  /// Fetch downsampled waveform peaks for [trackId].
+  /// Returns a [Float32List] of length [numPeaks]*2 with alternating (min, max) pairs,
+  /// or null if no sample is loaded for that track.
+  Float32List? getSamplePeaks(int trackId, {int numPeaks = 600}) {
+    _requireInitialized();
+    final outPtr = malloc.allocate<Float>(numPeaks * 2);
+    try {
+      final count = _bindings.getSamplePeaks(_ptr, trackId, outPtr, numPeaks);
+      if (count == 0) return null;
+      final result = Float32List(count * 2);
+      for (var i = 0; i < count * 2; i++) {
+        result[i] = outPtr[i];
+      }
+      return result;
+    } finally {
+      malloc.free(outPtr);
+    }
+  }
 
   /// Load a WAV file at [path] into [trackId]. Returns false on failure.
   bool loadSample(int trackId, String path) {

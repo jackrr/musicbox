@@ -45,6 +45,10 @@ class SequencerState {
 class SequencerNotifier extends StateNotifier<SequencerState> {
   final Ref _ref;
 
+  // Track which sample paths have been loaded into the engine this session so
+  // we don't re-decode WAV files on every project update (e.g. slider moves).
+  final List<String?> _loadedSamplePaths = List.filled(kNumTracks, null);
+
   SequencerNotifier(this._ref) : super(const SequencerState()) {
     // Sync initial project state into the engine on first load
     _ref.listen<AsyncValue<Project>>(projectProvider, (_, next) {
@@ -95,6 +99,14 @@ class SequencerNotifier extends StateNotifier<SequencerState> {
       engine.setSampleParam(ti, SampleParam.trimEnd,      sp.trimEnd);
       engine.setSampleParam(ti, SampleParam.basePitch,    sp.basePitch.toDouble());
       engine.setSampleParam(ti, SampleParam.playbackRate, sp.playbackRate);
+
+      // Reload sample audio if the path changed (e.g. on startup from saved project).
+      final path = track.samplePath;
+      if (path != null && path != _loadedSamplePaths[ti]) {
+        if (engine.loadSample(ti, path)) {
+          _loadedSamplePaths[ti] = path;
+        }
+      }
     }
     state = state.copyWith(bpm: p.bpm, numSteps: p.numSteps);
   }

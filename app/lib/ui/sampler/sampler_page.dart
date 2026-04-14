@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -90,7 +91,6 @@ class _SamplePad extends ConsumerWidget {
   }
 
   Future<void> _recordSample(BuildContext context, WidgetRef ref) async {
-    // Request microphone permission
     final status = await Permission.microphone.request();
     if (!status.isGranted) {
       if (context.mounted) {
@@ -112,7 +112,6 @@ class _SamplePad extends ConsumerWidget {
       return;
     }
 
-    // Show a dialog while recording — dismiss to stop
     if (!context.mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -138,7 +137,6 @@ class _SamplePad extends ConsumerWidget {
     );
 
     if (confirmed != true) {
-      // Discard — still need to stop the stream; we'll ignore the file
       final dir = await getApplicationDocumentsDirectory();
       final tmpPath = '${dir.path}/_rec_discard.wav';
       engine.stopRecording(tmpPath);
@@ -146,7 +144,6 @@ class _SamplePad extends ConsumerWidget {
       return;
     }
 
-    // Save to app documents directory
     final dir = await getApplicationDocumentsDirectory();
     final path = '${dir.path}/rec_t${trackIndex + 1}_${DateTime.now().millisecondsSinceEpoch}.wav';
 
@@ -160,7 +157,6 @@ class _SamplePad extends ConsumerWidget {
       return;
     }
 
-    // Load the recorded file into the sampler track
     final loaded = engine.loadSample(trackIndex, path);
     if (loaded) {
       ref.read(projectProvider.notifier).updateSamplePath(trackIndex, path);
@@ -172,6 +168,8 @@ class _SamplePad extends ConsumerWidget {
       context: context,
       backgroundColor: const Color(0xFF111111),
       isScrollControlled: true,
+      // Disable sheet drag-to-dismiss — it swallows slider/waveform gestures.
+      enableDrag: false,
       builder: (_) => _SampleEditorSheet(
         trackIndex: trackIndex,
         track: track,
@@ -189,52 +187,57 @@ class _SamplePad extends ConsumerWidget {
         ? track.samplePath!.split('/').last
         : 'T${trackIndex + 1}  —  empty';
 
-    return GestureDetector(
-      onTap: () {
+    // Use Listener for immediate noteOn on pointer-down (no tap-disambiguation
+    // delay), while GestureDetector handles the long-press to open the editor.
+    // Guard with hasSample() so we never accidentally trigger a synth voice.
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) {
         final engine = ref.read(engineProvider);
-        engine.noteOn(trackIndex, 60, 100);
-        if (!hasPath) engine.noteOff(trackIndex, 60);
+        if (engine.hasSample(trackIndex)) engine.noteOn(trackIndex, 60, 100);
       },
-      onLongPress: () => _showEditor(context, ref),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        decoration: BoxDecoration(
-          color: hasPath ? color.withAlpha(40) : Colors.white10,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: hasPath ? color : Colors.white24,
-            width: 2,
+      child: GestureDetector(
+        onLongPress: () => _showEditor(context, ref),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 100),
+          decoration: BoxDecoration(
+            color: hasPath ? color.withAlpha(40) : Colors.white10,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: hasPath ? color : Colors.white24,
+              width: 2,
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              hasPath ? Icons.music_note : Icons.add,
-              color: hasPath ? color : Colors.white38,
-              size: 32,
-            ),
-            const SizedBox(height: 6),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                name,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: hasPath ? color : Colors.white38,
-                  fontWeight: FontWeight.bold,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                hasPath ? Icons.music_note : Icons.add,
+                color: hasPath ? color : Colors.white38,
+                size: 32,
+              ),
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: hasPath ? color : Colors.white38,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            if (!hasPath)
-              const Text(
-                'hold to edit',
-                style: TextStyle(fontSize: 9, color: Colors.white24),
-              ),
-          ],
+              if (!hasPath)
+                const Text(
+                  'hold to edit',
+                  style: TextStyle(fontSize: 9, color: Colors.white24),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -265,6 +268,16 @@ class _SampleEditorSheet extends ConsumerStatefulWidget {
 }
 
 class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
+  Float32List? _peaks;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.track.samplePath != null) {
+      _peaks = ref.read(engineProvider).getSamplePeaks(widget.trackIndex);
+    }
+  }
+
   void _setSampleParam(SampleParam param, double value) {
     ref.read(engineProvider).setSampleParam(widget.trackIndex, param, value);
     ref.read(projectProvider.notifier).updateSampleParam(widget.trackIndex, param, value);
@@ -272,27 +285,44 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final sp = widget.track.sampleParams;
+    // Watch provider so sliders reflect live values after each change.
+    final sp = ref.watch(projectProvider).valueOrNull
+        ?.tracks[widget.trackIndex].sampleParams
+        ?? widget.track.sampleParams;
     final color = widget.color;
+    final hasPath = ref.watch(projectProvider).valueOrNull
+        ?.tracks[widget.trackIndex].samplePath != null
+        || widget.track.samplePath != null;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      padding: EdgeInsets.fromLTRB(
+        20, 16, 20,
+        MediaQuery.of(context).viewInsets.bottom + 32,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // Header row with close button
           Row(
             children: [
               Icon(Icons.album, color: color, size: 18),
               const SizedBox(width: 8),
-              Text(
-                'T${widget.trackIndex + 1}  —  sample editor',
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
+              Expanded(
+                child: Text(
+                  'T${widget.trackIndex + 1}  —  sample editor',
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1,
+                  ),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white38, size: 20),
+                onPressed: () => Navigator.pop(context),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
             ],
           ),
@@ -333,28 +363,24 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
             ],
           ),
 
-          if (widget.track.samplePath != null) ...[
+          if (hasPath) ...[
             const SizedBox(height: 20),
             const Divider(color: Colors.white12),
             const SizedBox(height: 12),
 
-            // Trim start
-            _SliderRow(
-              label: 'Trim start',
-              value: sp.trimStart,
-              min: 0.0, max: 0.99,
+            // Waveform + trim handles
+            _WaveformView(
+              peaks: _peaks,
+              trimStart: sp.trimStart,
+              trimEnd: sp.trimEnd,
               color: color,
-              onChanged: (v) => _setSampleParam(SampleParam.trimStart, v),
+              onTrimStartChanged: (v) => _setSampleParam(SampleParam.trimStart, v),
+              onTrimEndChanged:   (v) => _setSampleParam(SampleParam.trimEnd,   v),
             ),
-            // Trim end
-            _SliderRow(
-              label: 'Trim end',
-              value: sp.trimEnd,
-              min: 0.01, max: 1.0,
-              color: color,
-              onChanged: (v) => _setSampleParam(SampleParam.trimEnd, v),
-            ),
-            // Root note (base pitch)
+
+            const SizedBox(height: 16),
+
+            // Root note slider
             _SliderRow(
               label: 'Root note  (${_noteName(sp.basePitch)})',
               value: sp.basePitch.toDouble(),
@@ -363,7 +389,7 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
               color: color,
               onChanged: (v) => _setSampleParam(SampleParam.basePitch, v),
             ),
-            // Playback rate
+            // Playback rate slider
             _SliderRow(
               label: 'Speed  ×${sp.playbackRate.toStringAsFixed(2)}',
               value: sp.playbackRate,
@@ -377,6 +403,191 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Waveform display + draggable trim handles
+// ---------------------------------------------------------------------------
+
+class _WaveformView extends StatefulWidget {
+  final Float32List? peaks;
+  final double trimStart;
+  final double trimEnd;
+  final Color color;
+  final ValueChanged<double> onTrimStartChanged;
+  final ValueChanged<double> onTrimEndChanged;
+
+  const _WaveformView({
+    required this.peaks,
+    required this.trimStart,
+    required this.trimEnd,
+    required this.color,
+    required this.onTrimStartChanged,
+    required this.onTrimEndChanged,
+  });
+
+  @override
+  State<_WaveformView> createState() => _WaveformViewState();
+}
+
+class _WaveformViewState extends State<_WaveformView> {
+  _DragTarget _dragging = _DragTarget.none;
+  // Touch threshold in logical pixels for grabbing a handle.
+  static const _kHandleHitSlop = 28.0;
+
+  void _onPanStart(DragStartDetails d, double width) {
+    final x = d.localPosition.dx;
+    final startX = widget.trimStart * width;
+    final endX   = widget.trimEnd   * width;
+    final dStart = (x - startX).abs();
+    final dEnd   = (x - endX).abs();
+
+    if (dStart < _kHandleHitSlop && dStart <= dEnd) {
+      setState(() => _dragging = _DragTarget.start);
+    } else if (dEnd < _kHandleHitSlop) {
+      setState(() => _dragging = _DragTarget.end);
+    } else {
+      _dragging = _DragTarget.none;
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails d, double width) {
+    if (_dragging == _DragTarget.none) return;
+    final norm = (d.localPosition.dx / width).clamp(0.0, 1.0);
+    if (_dragging == _DragTarget.start) {
+      widget.onTrimStartChanged(norm.clamp(0.0, (widget.trimEnd - 0.02).clamp(0.0, 0.99)));
+    } else {
+      widget.onTrimEndChanged(norm.clamp((widget.trimStart + 0.02).clamp(0.01, 1.0), 1.0));
+    }
+  }
+
+  void _onPanEnd(DragEndDetails _) => setState(() => _dragging = _DragTarget.none);
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart:  (d) => _onPanStart(d, width),
+        onPanUpdate: (d) => _onPanUpdate(d, width),
+        onPanEnd:    _onPanEnd,
+        child: CustomPaint(
+          size: Size(width, 100),
+          painter: _WaveformPainter(
+            peaks:     widget.peaks,
+            trimStart: widget.trimStart,
+            trimEnd:   widget.trimEnd,
+            color:     widget.color,
+            dragging:  _dragging,
+          ),
+        ),
+      );
+    });
+  }
+}
+
+enum _DragTarget { none, start, end }
+
+class _WaveformPainter extends CustomPainter {
+  final Float32List? peaks;
+  final double trimStart;
+  final double trimEnd;
+  final Color color;
+  final _DragTarget dragging;
+
+  _WaveformPainter({
+    required this.peaks,
+    required this.trimStart,
+    required this.trimEnd,
+    required this.color,
+    required this.dragging,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final half = h / 2;
+
+    // Background
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, w, h),
+      Paint()..color = Colors.white.withAlpha(8),
+    );
+
+    // Waveform bars
+    final numPeaks = (peaks?.length ?? 0) ~/ 2;
+    if (numPeaks > 0) {
+      final barW = w / numPeaks;
+      final activePaint   = Paint()..color = color.withAlpha(200)..strokeWidth = barW.clamp(1.0, 3.0);
+      final inactivePaint = Paint()..color = color.withAlpha(50) ..strokeWidth = barW.clamp(1.0, 3.0);
+
+      for (var i = 0; i < numPeaks; i++) {
+        final mn   = peaks![i * 2];
+        final mx   = peaks![i * 2 + 1];
+        final x    = (i + 0.5) * barW;
+        final norm = x / w;
+        final p    = (norm >= trimStart && norm <= trimEnd) ? activePaint : inactivePaint;
+        // Map -1..1 amplitude to pixel coords (positive = up from centre)
+        final yTop = (half - mx.clamp(-1.0, 1.0) * half).clamp(0.0, h);
+        final yBot = (half - mn.clamp(-1.0, 1.0) * half).clamp(0.0, h);
+        canvas.drawLine(Offset(x, yTop), Offset(x, yBot.clamp(yTop, h)), p);
+      }
+    } else {
+      // No sample — placeholder line
+      canvas.drawLine(
+        Offset(0, half), Offset(w, half),
+        Paint()..color = Colors.white12..strokeWidth = 1,
+      );
+    }
+
+    // Inactive region overlay
+    final overlayPaint = Paint()..color = Colors.black.withAlpha(110);
+    final sx = trimStart * w;
+    final ex = trimEnd * w;
+    if (sx > 0) canvas.drawRect(Rect.fromLTWH(0, 0, sx, h), overlayPaint);
+    if (ex < w) canvas.drawRect(Rect.fromLTWH(ex, 0, w - ex, h), overlayPaint);
+
+    // Trim handles
+    _drawHandle(canvas, size, sx, isStart: true,  active: dragging == _DragTarget.start);
+    _drawHandle(canvas, size, ex, isStart: false, active: dragging == _DragTarget.end);
+  }
+
+  void _drawHandle(Canvas canvas, Size size, double x, {required bool isStart, required bool active}) {
+    final lineColor  = active ? Colors.white : color;
+    final fillColor  = active ? Colors.white : color;
+    final linePaint  = Paint()..color = lineColor..strokeWidth = 2;
+    final fillPaint  = Paint()..color = fillColor..style = PaintingStyle.fill;
+
+    canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
+
+    // Small tab at the top
+    const tabW = 10.0;
+    const tabH = 14.0;
+    final left  = isStart ? x : x - tabW;
+    final right = isStart ? x + tabW : x;
+    final path = Path()
+      ..moveTo(left, 0)
+      ..lineTo(right, 0)
+      ..lineTo(right, tabH)
+      ..lineTo(x, tabH + 4)
+      ..lineTo(left, tabH)
+      ..close();
+    canvas.drawPath(path, fillPaint);
+  }
+
+  @override
+  bool shouldRepaint(_WaveformPainter old) =>
+      old.peaks    != peaks    ||
+      old.trimStart != trimStart ||
+      old.trimEnd   != trimEnd   ||
+      old.color     != color     ||
+      old.dragging  != dragging;
+}
+
+// ---------------------------------------------------------------------------
+// Slider row
+// ---------------------------------------------------------------------------
 
 class _SliderRow extends StatelessWidget {
   final String label;

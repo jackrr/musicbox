@@ -36,6 +36,12 @@ typedef _StartRecordingDart   = bool Function(Pointer<Void>);
 typedef _StopRecordingNative = Bool Function(Pointer<Void>, Pointer<Uint8>, Size);
 typedef _StopRecordingDart   = bool Function(Pointer<Void>, Pointer<Uint8>, int);
 
+typedef _HasSampleNative = Bool Function(Pointer<Void>, Uint8);
+typedef _HasSampleDart   = bool Function(Pointer<Void>, int);
+
+typedef _GetSamplePeaksNative = Uint32 Function(Pointer<Void>, Uint8, Pointer<Float>, Size);
+typedef _GetSamplePeaksDart   = int Function(Pointer<Void>, int, Pointer<Float>, int);
+
 // --- EngineBindings ------------------------------------------------------------
 
 /// Raw FFI bindings to the Rust engine shared library.
@@ -55,6 +61,8 @@ class EngineBindings {
   late final int  Function(Pointer<Void>) exportProgress;
   late final bool Function(Pointer<Void>) startRecording;
   late final bool Function(Pointer<Void>, Pointer<Uint8>, int) stopRecording;
+  late final bool Function(Pointer<Void>, int) hasSample;
+  late final int  Function(Pointer<Void>, int, Pointer<Float>, int) getSamplePeaks;
 
   EngineBindings() : _lib = _openLibrary() {
     create = _lib.lookupFunction<_CreateNative, _CreateDart>(
@@ -79,6 +87,10 @@ class EngineBindings {
         'musicbox_engine_start_recording');
     stopRecording = _lib.lookupFunction<_StopRecordingNative, _StopRecordingDart>(
         'musicbox_engine_stop_recording');
+    hasSample = _lib.lookupFunction<_HasSampleNative, _HasSampleDart>(
+        'musicbox_engine_has_sample');
+    getSamplePeaks = _lib.lookupFunction<_GetSamplePeaksNative, _GetSamplePeaksDart>(
+        'musicbox_engine_get_sample_peaks');
   }
 
   static DynamicLibrary _openLibrary() {
