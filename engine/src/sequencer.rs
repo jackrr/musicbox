@@ -45,7 +45,6 @@ impl Sequencer {
     }
 
     pub fn bpm(&self) -> f32 { self.bpm }
-    pub fn num_steps(&self) -> usize { self.num_steps }
 
     pub fn set_bpm(&mut self, bpm: f32) {
         self.bpm = bpm.clamp(20.0, 300.0);

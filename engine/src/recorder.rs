@@ -82,7 +82,6 @@ impl Recorder {
         Ok(())
     }
 
-    pub fn sample_rate(&self) -> u32 { self.sample_rate }
 }
 
 fn record_mono(data: &[f32], channels: usize, buf: &Arc<Mutex<Vec<f32>>>) {

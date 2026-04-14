@@ -163,27 +163,39 @@ class PadCell {
   final int trackId;
   final String label;
   final int colorValue; // Color.value (ARGB)
+  final int colSpan;    // 1..gridColumns
+  final int rowSpan;    // 1..N
 
   const PadCell({
     required this.trackId,
     required this.label,
     required this.colorValue,
+    this.colSpan = 1,
+    this.rowSpan = 1,
   });
 
-  PadCell copyWith({int? trackId, String? label, int? colorValue}) => PadCell(
+  PadCell copyWith({
+    int? trackId, String? label, int? colorValue,
+    int? colSpan, int? rowSpan,
+  }) => PadCell(
     trackId:    trackId    ?? this.trackId,
     label:      label      ?? this.label,
     colorValue: colorValue ?? this.colorValue,
+    colSpan:    colSpan    ?? this.colSpan,
+    rowSpan:    rowSpan    ?? this.rowSpan,
   );
 
   Map<String, dynamic> toJson() => {
     'trackId': trackId, 'label': label, 'colorValue': colorValue,
+    'colSpan': colSpan, 'rowSpan': rowSpan,
   };
 
   factory PadCell.fromJson(Map<String, dynamic> j) => PadCell(
     trackId:    j['trackId']    as int,
     label:      j['label']      as String,
     colorValue: j['colorValue'] as int,
+    colSpan:    j['colSpan']    as int? ?? 1,
+    rowSpan:    j['rowSpan']    as int? ?? 1,
   );
 }
 

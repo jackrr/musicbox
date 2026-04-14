@@ -80,7 +80,11 @@ impl AudioState {
                                     fx.delay_time_beats = value.clamp(0.0625, 4.0);
                                     self.effects.set_bpm(self.sequencer.bpm(), value);
                                 }
-                                EffectParam::DelayFeedback => fx.delay_feedback   = value.clamp(0.0, 0.95),
+                                EffectParam::DelayFeedback => {
+                                    let fb = value.clamp(0.0, 0.95);
+                                    fx.delay_feedback = fb;
+                                    self.effects.set_delay_feedback(fb);
+                                }
                                 EffectParam::DistDrive     => fx.dist_drive       = value.clamp(0.0, 1.0),
                                 EffectParam::FilterType    => {
                                     fx.filter_mode = value as u8;

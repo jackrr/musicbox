@@ -196,6 +196,10 @@ impl EffectsChain {
         self.delay.set_time_samples(samples);
     }
 
+    pub fn set_delay_feedback(&mut self, fb: f32) {
+        self.delay.set_feedback(fb);
+    }
+
     /// Recompute filter coefficients for a track after its params change.
     pub fn update_filter(&mut self, track_id: u8) {
         let t = track_id as usize;

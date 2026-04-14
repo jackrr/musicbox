@@ -58,12 +58,13 @@ class _SynthPageState extends ConsumerState<SynthPage> {
 
                         const SizedBox(height: 12),
 
-                        // ADSR envelope visualizer
+                        // ADSR envelope visualizer (also drag-to-edit)
                         AdsrVisualizer(
                           attack:  vp.attack,
                           decay:   vp.decay,
                           sustain: vp.sustain,
                           release: vp.release,
+                          onChanged: _setParam,
                         ),
 
                         const SizedBox(height: 12),
