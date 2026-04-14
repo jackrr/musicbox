@@ -16,44 +16,97 @@ class AiService {
   final _storage = const FlutterSecureStorage();
 
   Future<String?> getApiKey() => _storage.read(key: _apiKeyStorageKey);
-
   Future<void> saveApiKey(String key) =>
       _storage.write(key: _apiKeyStorageKey, value: key);
-
   Future<void> clearApiKey() => _storage.delete(key: _apiKeyStorageKey);
-
   Future<bool> hasApiKey() async {
     final k = await getApiKey();
     return k != null && k.isNotEmpty;
   }
 
-  /// Stream a response from Claude. Each emitted String is a text delta.
+  // ---------------------------------------------------------------------------
+  // Non-streaming request — used for tool-enabled chat turns.
+  //
+  // Returns the raw content block list from Claude's response so the caller
+  // can handle both text blocks and tool_use blocks.
+  // ---------------------------------------------------------------------------
+
+  Future<({String text, List<Map<String, dynamic>> toolCalls, String stopReason})>
+      chatRequest({
+    required String systemPrompt,
+    required List<Map<String, dynamic>> messages,
+    List<Map<String, dynamic>> tools = const [],
+  }) async {
+    final key = await getApiKey();
+    if (key == null || key.isEmpty) {
+      throw const AiServiceException('No API key configured.');
+    }
+
+    final body = <String, dynamic>{
+      'model':      _model,
+      'max_tokens': 1024,
+      'system':     systemPrompt,
+      'messages':   messages,
+    };
+    if (tools.isNotEmpty) body['tools'] = tools;
+
+    final resp = await http.post(
+      Uri.parse(_apiUrl),
+      headers: {
+        'x-api-key':         key,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
+      },
+      body: jsonEncode(body),
+    );
+
+    if (resp.statusCode != 200) {
+      throw AiServiceException('API error ${resp.statusCode}: ${resp.body}');
+    }
+
+    final json       = jsonDecode(resp.body) as Map<String, dynamic>;
+    final content    = (json['content'] as List).cast<Map<String, dynamic>>();
+    final stopReason = (json['stop_reason'] as String?) ?? '';
+
+    final text = content
+        .where((b) => b['type'] == 'text')
+        .map((b) => b['text'] as String)
+        .join('');
+
+    final toolCalls = content
+        .where((b) => b['type'] == 'tool_use')
+        .toList();
+
+    return (text: text, toolCalls: toolCalls, stopReason: stopReason);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Streaming request — used for text-only modes (MIX suggestions etc.)
+  //
+  // [messages] is the full Anthropic-format conversation history.
+  // ---------------------------------------------------------------------------
+
   Stream<String> streamMessage({
     required String systemPrompt,
-    required String userMessage,
-    Map<String, dynamic>? context,
+    required List<Map<String, dynamic>> messages,
   }) async* {
     final key = await getApiKey();
     if (key == null || key.isEmpty) {
       throw const AiServiceException('No API key configured.');
     }
 
-    final fullUser = context != null
-        ? '${jsonEncode(context)}\n\n$userMessage'
-        : userMessage;
-
     final request = http.Request('POST', Uri.parse(_apiUrl))
       ..headers.addAll({
-        'x-api-key':          key,
-        'anthropic-version':  '2023-06-01',
-        'content-type':       'application/json',
+        'x-api-key':         key,
+        'anthropic-version': '2023-06-01',
+        'content-type':      'application/json',
       })
       ..body = jsonEncode({
         'model':      _model,
         'max_tokens': 1024,
         'stream':     true,
         'system':     systemPrompt,
-        'messages':   [{'role': 'user', 'content': fullUser}],
+        'messages':   messages,
       });
 
     final response = await http.Client().send(request);
@@ -82,18 +135,14 @@ class AiService {
     }
   }
 
-  /// Convenience: collect full text response (non-streaming).
+  /// Convenience: collect full streaming response (non-streaming callers).
   Future<String> complete({
     required String systemPrompt,
-    required String userMessage,
-    Map<String, dynamic>? context,
+    required List<Map<String, dynamic>> messages,
   }) async {
     final buffer = StringBuffer();
     await for (final chunk in streamMessage(
-      systemPrompt: systemPrompt,
-      userMessage:  userMessage,
-      context:      context,
-    )) {
+        systemPrompt: systemPrompt, messages: messages)) {
       buffer.write(chunk);
     }
     return buffer.toString();
