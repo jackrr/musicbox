@@ -5,14 +5,12 @@ enum OscType { sine, saw, square, triangle, noise }
 
 /// Voice parameter IDs — must match the Rust `VoiceParam` enum (repr u8).
 enum VoiceParam {
-  oscType,   // 0..4 via OscType index
-  attack,    // seconds (0.001..10)
-  decay,     // seconds
-  sustain,   // 0..1
-  release,   // seconds
-  cutoff,    // 0..1 normalised (20 Hz..20 kHz log)
-  resonance, // 0..1 normalised (Q 0.5..20)
-  volume,    // 0..1
+  oscType,  // 0..4 via OscType index
+  attack,   // seconds (0.001..10)
+  decay,    // seconds
+  sustain,  // 0..1
+  release,  // seconds
+  volume,   // 0..1
 }
 
 /// Transport state — must match Rust decode (param_a: 0=stop, 1=play, 2=reset).
@@ -20,11 +18,16 @@ enum TransportState { stop, play, reset }
 
 /// Effect parameter IDs — must match Rust `EffectParam` enum (repr u8).
 enum EffectParam {
-  reverbSend,    // 0..1
-  delayTime,     // beats (0.0625..4)
-  delayFeedback, // 0..0.95
-  delaySend,     // 0..1
-  distDrive,     // 0..1
+  reverbSend,      // 0 — per-track: 0..1
+  delayTime,       // 1 — per-track: beats (0.0625..4)
+  delayFeedback,   // 2 — per-track: 0..0.95
+  delaySend,       // 3 — per-track: 0..1
+  distDrive,       // 4 — per-track: 0..1
+  reverbRoom,      // 5 — global: 0..1
+  reverbDamp,      // 6 — global: 0..1
+  filterType,      // 7 — per-track: 0=off, 1=LP, 2=HP
+  filterCutoff,    // 8 — per-track: 0..1 normalised
+  filterResonance, // 9 — per-track: 0..1 normalised
 }
 
 /// Single step in the sequencer pattern.

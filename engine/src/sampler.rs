@@ -63,26 +63,24 @@ impl Sampler {
     /// For samplers, note-off doesn't stop one-shot playback.
     pub fn note_off(&mut self, _track_id: u8) {}
 
-    /// Accumulate sampler output into `output` (interleaved f32, pre-zeroed).
-    pub fn render(&mut self, output: &mut [f32], n_frames: usize, channels: usize) {
-        for t in &mut self.tracks {
-            if !t.playing { continue; }
-            let data = match &t.data { Some(d) => Arc::clone(d), None => continue };
+    /// Accumulate one track's sampler output into `buf` (mono, pre-zeroed by caller).
+    pub fn render_track(&mut self, track_id: u8, buf: &mut [f32], n: usize) {
+        let t = match self.tracks.get_mut(track_id as usize) {
+            Some(t) => t,
+            None => return,
+        };
+        if !t.playing { return; }
+        let data = match &t.data { Some(d) => Arc::clone(d), None => return };
 
-            for f in 0..n_frames {
-                let pos = t.read_head as usize;
-                if pos + 1 >= data.len() { t.playing = false; break; }
+        for f in 0..n {
+            let pos = t.read_head as usize;
+            if pos + 1 >= data.len() { t.playing = false; break; }
 
-                // Linear interpolation
-                let frac   = t.read_head.fract() as f32;
-                let sample = data[pos] * (1.0 - frac) + data[pos + 1] * frac;
-
-                for ch in 0..channels {
-                    let i = f * channels + ch;
-                    if i < output.len() { output[i] += sample * 0.6; }
-                }
-                t.read_head += t.rate_ratio;
-            }
+            // Linear interpolation
+            let frac   = t.read_head.fract() as f32;
+            let sample = data[pos] * (1.0 - frac) + data[pos + 1] * frac;
+            if f < buf.len() { buf[f] += sample * 0.6; }
+            t.read_head += t.rate_ratio;
         }
     }
 }

@@ -13,55 +13,45 @@ class VoiceParamsData {
   final double decay;
   final double sustain;
   final double release;
-  final double cutoff;
-  final double resonance;
   final double volume;
 
   const VoiceParamsData({
-    this.oscType   = OscType.sine,
-    this.attack    = 0.01,
-    this.decay     = 0.1,
-    this.sustain   = 0.7,
-    this.release   = 0.4,
-    this.cutoff    = 1.0,
-    this.resonance = 0.0,
-    this.volume    = 0.8,
+    this.oscType = OscType.sine,
+    this.attack  = 0.01,
+    this.decay   = 0.1,
+    this.sustain = 0.7,
+    this.release = 0.4,
+    this.volume  = 0.8,
   });
 
   VoiceParamsData copyWith({
-    OscType? oscType, double? attack, double? decay, double? sustain,
-    double? release, double? cutoff, double? resonance, double? volume,
+    OscType? oscType, double? attack, double? decay,
+    double? sustain, double? release, double? volume,
   }) => VoiceParamsData(
-    oscType:   oscType   ?? this.oscType,
-    attack:    attack    ?? this.attack,
-    decay:     decay     ?? this.decay,
-    sustain:   sustain   ?? this.sustain,
-    release:   release   ?? this.release,
-    cutoff:    cutoff    ?? this.cutoff,
-    resonance: resonance ?? this.resonance,
-    volume:    volume    ?? this.volume,
+    oscType: oscType ?? this.oscType,
+    attack:  attack  ?? this.attack,
+    decay:   decay   ?? this.decay,
+    sustain: sustain ?? this.sustain,
+    release: release ?? this.release,
+    volume:  volume  ?? this.volume,
   );
 
   Map<String, dynamic> toJson() => {
-    'oscType':   oscType.index,
-    'attack':    attack,
-    'decay':     decay,
-    'sustain':   sustain,
-    'release':   release,
-    'cutoff':    cutoff,
-    'resonance': resonance,
-    'volume':    volume,
+    'oscType': oscType.index,
+    'attack':  attack,
+    'decay':   decay,
+    'sustain': sustain,
+    'release': release,
+    'volume':  volume,
   };
 
   factory VoiceParamsData.fromJson(Map<String, dynamic> j) => VoiceParamsData(
-    oscType:   OscType.values[j['oscType'] as int],
-    attack:    (j['attack']    as num).toDouble(),
-    decay:     (j['decay']     as num).toDouble(),
-    sustain:   (j['sustain']   as num).toDouble(),
-    release:   (j['release']   as num).toDouble(),
-    cutoff:    (j['cutoff']    as num).toDouble(),
-    resonance: (j['resonance'] as num).toDouble(),
-    volume:    (j['volume']    as num).toDouble(),
+    oscType: OscType.values[j['oscType'] as int],
+    attack:  (j['attack']  as num).toDouble(),
+    decay:   (j['decay']   as num).toDouble(),
+    sustain: (j['sustain'] as num).toDouble(),
+    release: (j['release'] as num).toDouble(),
+    volume:  (j['volume']  as num? ?? 0.8).toDouble(),
   );
 }
 
@@ -75,38 +65,54 @@ class TrackEffectsData {
   final double delayTime;
   final double delayFeedback;
   final double distDrive;
+  final int    filterMode;      // 0=off, 1=LP, 2=HP
+  final double filterCutoff;
+  final double filterResonance;
 
   const TrackEffectsData({
-    this.reverbSend    = 0.0,
-    this.delaySend     = 0.0,
-    this.delayTime     = 0.5,
-    this.delayFeedback = 0.4,
-    this.distDrive     = 0.0,
+    this.reverbSend     = 0.0,
+    this.delaySend      = 0.0,
+    this.delayTime      = 0.5,
+    this.delayFeedback  = 0.4,
+    this.distDrive      = 0.0,
+    this.filterMode     = 0,
+    this.filterCutoff   = 0.5,
+    this.filterResonance = 0.0,
   });
 
   TrackEffectsData copyWith({
     double? reverbSend, double? delaySend, double? delayTime,
     double? delayFeedback, double? distDrive,
+    int? filterMode, double? filterCutoff, double? filterResonance,
   }) => TrackEffectsData(
-    reverbSend:    reverbSend    ?? this.reverbSend,
-    delaySend:     delaySend     ?? this.delaySend,
-    delayTime:     delayTime     ?? this.delayTime,
-    delayFeedback: delayFeedback ?? this.delayFeedback,
-    distDrive:     distDrive     ?? this.distDrive,
+    reverbSend:     reverbSend     ?? this.reverbSend,
+    delaySend:      delaySend      ?? this.delaySend,
+    delayTime:      delayTime      ?? this.delayTime,
+    delayFeedback:  delayFeedback  ?? this.delayFeedback,
+    distDrive:      distDrive      ?? this.distDrive,
+    filterMode:     filterMode     ?? this.filterMode,
+    filterCutoff:   filterCutoff   ?? this.filterCutoff,
+    filterResonance: filterResonance ?? this.filterResonance,
   );
 
   Map<String, dynamic> toJson() => {
     'reverbSend': reverbSend, 'delaySend': delaySend,
     'delayTime': delayTime, 'delayFeedback': delayFeedback,
     'distDrive': distDrive,
+    'filterMode': filterMode,
+    'filterCutoff': filterCutoff,
+    'filterResonance': filterResonance,
   };
 
   factory TrackEffectsData.fromJson(Map<String, dynamic> j) => TrackEffectsData(
-    reverbSend:    (j['reverbSend']    as num).toDouble(),
-    delaySend:     (j['delaySend']     as num).toDouble(),
-    delayTime:     (j['delayTime']     as num).toDouble(),
-    delayFeedback: (j['delayFeedback'] as num).toDouble(),
-    distDrive:     (j['distDrive']     as num).toDouble(),
+    reverbSend:     (j['reverbSend']     as num).toDouble(),
+    delaySend:      (j['delaySend']      as num).toDouble(),
+    delayTime:      (j['delayTime']      as num).toDouble(),
+    delayFeedback:  (j['delayFeedback']  as num).toDouble(),
+    distDrive:      (j['distDrive']      as num).toDouble(),
+    filterMode:     (j['filterMode']     as int?  ?? 0),
+    filterCutoff:   (j['filterCutoff']   as num?  ?? 0.5).toDouble(),
+    filterResonance: (j['filterResonance'] as num? ?? 0.0).toDouble(),
   );
 }
 
@@ -124,7 +130,7 @@ class TrackConfig {
   final List<StepData> steps; // length == numSteps (padded to kMaxSteps)
 
   const TrackConfig({
-    this.mode       = TrackMode.synth,
+    this.mode        = TrackMode.synth,
     this.samplePath,
     this.voiceParams = const VoiceParamsData(),
     this.effects     = const TrackEffectsData(),
@@ -175,15 +181,19 @@ class Project {
   final double bpm;
   final int numSteps;
   final List<TrackConfig> tracks; // length kNumTracks
+  final double reverbRoom;  // global reverb room size 0..1
+  final double reverbDamp;  // global reverb damping 0..1
   final DateTime createdAt;
   final DateTime updatedAt;
 
   const Project({
     required this.id,
     required this.name,
-    this.bpm      = 120.0,
-    this.numSteps = 16,
+    this.bpm       = 120.0,
+    this.numSteps  = 16,
     required this.tracks,
+    this.reverbRoom = 0.5,
+    this.reverbDamp = 0.5,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -201,15 +211,19 @@ class Project {
 
   Project copyWith({
     String? name, double? bpm, int? numSteps,
-    List<TrackConfig>? tracks, DateTime? updatedAt,
+    List<TrackConfig>? tracks,
+    double? reverbRoom, double? reverbDamp,
+    DateTime? updatedAt,
   }) => Project(
-    id:        id,
-    name:      name      ?? this.name,
-    bpm:       bpm       ?? this.bpm,
-    numSteps:  numSteps  ?? this.numSteps,
-    tracks:    tracks    ?? this.tracks,
-    createdAt: createdAt,
-    updatedAt: updatedAt ?? this.updatedAt,
+    id:         id,
+    name:       name       ?? this.name,
+    bpm:        bpm        ?? this.bpm,
+    numSteps:   numSteps   ?? this.numSteps,
+    tracks:     tracks     ?? this.tracks,
+    reverbRoom: reverbRoom ?? this.reverbRoom,
+    reverbDamp: reverbDamp ?? this.reverbDamp,
+    createdAt:  createdAt,
+    updatedAt:  updatedAt  ?? this.updatedAt,
   );
 
   Map<String, dynamic> toJson() => {
@@ -218,6 +232,8 @@ class Project {
     'bpm':       bpm,
     'numSteps':  numSteps,
     'tracks':    tracks.map((t) => t.toJson()).toList(),
+    'reverbRoom': reverbRoom,
+    'reverbDamp': reverbDamp,
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
   };
@@ -230,6 +246,8 @@ class Project {
     tracks:    (j['tracks'] as List)
         .map((t) => TrackConfig.fromJson(t as Map<String, dynamic>))
         .toList(),
+    reverbRoom: (j['reverbRoom'] as num? ?? 0.5).toDouble(),
+    reverbDamp: (j['reverbDamp'] as num? ?? 0.5).toDouble(),
     createdAt: DateTime.parse(j['createdAt'] as String),
     updatedAt: DateTime.parse(j['updatedAt'] as String),
   );

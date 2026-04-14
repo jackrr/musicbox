@@ -8,14 +8,15 @@ import 'engine_provider.dart';
 import 'project_provider.dart';
 
 // ---------------------------------------------------------------------------
-// Playhead — polled from Rust at ~60 fps
+// Playhead — polled from Rust at ~120 fps, deduplicated so rebuilds only
+// happen when the step actually changes.
 // ---------------------------------------------------------------------------
 
 final playheadProvider = StreamProvider<int>((ref) {
   final engine = ref.watch(engineProvider);
-  return Stream.periodic(const Duration(milliseconds: 16), (_) {
+  return Stream.periodic(const Duration(milliseconds: 8), (_) {
     return engine.getPlayhead();
-  });
+  }).distinct();
 });
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,11 @@ class SequencerNotifier extends StateNotifier<SequencerState> {
     final engine = _ref.read(engineProvider);
     engine.setBpm(p.bpm);
     engine.setNumSteps(p.numSteps);
+
+    // Global reverb params
+    engine.setEffect(0, EffectParam.reverbRoom, p.reverbRoom);
+    engine.setEffect(0, EffectParam.reverbDamp, p.reverbDamp);
+
     for (var ti = 0; ti < kNumTracks; ti++) {
       final track = p.tracks[ti];
       for (var si = 0; si < kMaxSteps; si++) {
@@ -67,21 +73,22 @@ class SequencerNotifier extends StateNotifier<SequencerState> {
       }
       // Voice params
       final vp = track.voiceParams;
-      engine.setVoiceParam(ti, VoiceParam.oscType,   vp.oscType.index.toDouble());
-      engine.setVoiceParam(ti, VoiceParam.attack,    vp.attack);
-      engine.setVoiceParam(ti, VoiceParam.decay,     vp.decay);
-      engine.setVoiceParam(ti, VoiceParam.sustain,   vp.sustain);
-      engine.setVoiceParam(ti, VoiceParam.release,   vp.release);
-      engine.setVoiceParam(ti, VoiceParam.cutoff,    vp.cutoff);
-      engine.setVoiceParam(ti, VoiceParam.resonance, vp.resonance);
-      engine.setVoiceParam(ti, VoiceParam.volume,    vp.volume);
+      engine.setVoiceParam(ti, VoiceParam.oscType,  vp.oscType.index.toDouble());
+      engine.setVoiceParam(ti, VoiceParam.attack,   vp.attack);
+      engine.setVoiceParam(ti, VoiceParam.decay,    vp.decay);
+      engine.setVoiceParam(ti, VoiceParam.sustain,  vp.sustain);
+      engine.setVoiceParam(ti, VoiceParam.release,  vp.release);
+      engine.setVoiceParam(ti, VoiceParam.volume,   vp.volume);
       // Effects
       final fx = track.effects;
-      engine.setEffect(ti, EffectParam.reverbSend,    fx.reverbSend);
-      engine.setEffect(ti, EffectParam.delaySend,     fx.delaySend);
-      engine.setEffect(ti, EffectParam.delayTime,     fx.delayTime);
-      engine.setEffect(ti, EffectParam.delayFeedback, fx.delayFeedback);
-      engine.setEffect(ti, EffectParam.distDrive,     fx.distDrive);
+      engine.setEffect(ti, EffectParam.reverbSend,     fx.reverbSend);
+      engine.setEffect(ti, EffectParam.delaySend,      fx.delaySend);
+      engine.setEffect(ti, EffectParam.delayTime,      fx.delayTime);
+      engine.setEffect(ti, EffectParam.delayFeedback,  fx.delayFeedback);
+      engine.setEffect(ti, EffectParam.distDrive,      fx.distDrive);
+      engine.setEffect(ti, EffectParam.filterType,     fx.filterMode.toDouble());
+      engine.setEffect(ti, EffectParam.filterCutoff,   fx.filterCutoff);
+      engine.setEffect(ti, EffectParam.filterResonance, fx.filterResonance);
     }
     state = state.copyWith(bpm: p.bpm, numSteps: p.numSteps);
   }

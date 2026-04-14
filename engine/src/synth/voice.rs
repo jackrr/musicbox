@@ -1,5 +1,4 @@
 use crate::commands::VoiceParam;
-use crate::synth::filter::BiquadCoeffs;
 
 // ---------------------------------------------------------------------------
 // Per-track parameters (snapshot taken at NoteOn time)
@@ -7,27 +6,23 @@ use crate::synth::filter::BiquadCoeffs;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TrackParams {
-    pub osc_type:  OscType,
-    pub attack:    f32, // seconds
-    pub decay:     f32, // seconds
-    pub sustain:   f32, // 0..1
-    pub release:   f32, // seconds
-    pub cutoff:    f32, // 0..1 normalised
-    pub resonance: f32, // 0..1 normalised
-    pub volume:    f32, // 0..1
+    pub osc_type: OscType,
+    pub attack:   f32, // seconds
+    pub decay:    f32, // seconds
+    pub sustain:  f32, // 0..1
+    pub release:  f32, // seconds
+    pub volume:   f32, // 0..1
 }
 
 impl Default for TrackParams {
     fn default() -> Self {
         Self {
-            osc_type:  OscType::Sine,
-            attack:    0.01,
-            decay:     0.15,
-            sustain:   0.7,
-            release:   0.4,
-            cutoff:    1.0, // fully open
-            resonance: 0.0,
-            volume:    0.75,
+            osc_type: OscType::Sine,
+            attack:   0.01,
+            decay:    0.15,
+            sustain:  0.7,
+            release:  0.4,
+            volume:   0.75,
         }
     }
 }
@@ -35,14 +30,12 @@ impl Default for TrackParams {
 impl TrackParams {
     pub fn apply(&mut self, param: VoiceParam, value: f32) {
         match param {
-            VoiceParam::OscType   => self.osc_type  = OscType::from_f32(value),
-            VoiceParam::Attack    => self.attack     = value.max(0.001),
-            VoiceParam::Decay     => self.decay      = value.max(0.001),
-            VoiceParam::Sustain   => self.sustain    = value.clamp(0.0, 1.0),
-            VoiceParam::Release   => self.release    = value.max(0.001),
-            VoiceParam::Cutoff    => self.cutoff     = value.clamp(0.0, 1.0),
-            VoiceParam::Resonance => self.resonance  = value.clamp(0.0, 1.0),
-            VoiceParam::Volume    => self.volume     = value.clamp(0.0, 1.0),
+            VoiceParam::OscType => self.osc_type = OscType::from_f32(value),
+            VoiceParam::Attack  => self.attack    = value.max(0.001),
+            VoiceParam::Decay   => self.decay     = value.max(0.001),
+            VoiceParam::Sustain => self.sustain   = value.clamp(0.0, 1.0),
+            VoiceParam::Release => self.release   = value.max(0.001),
+            VoiceParam::Volume  => self.volume    = value.clamp(0.0, 1.0),
         }
     }
 }
@@ -102,10 +95,6 @@ pub struct Voice {
     release:     f32,
     release_lvl: f32,  // level at which release began
 
-    // Biquad low-pass filter + delay-line state
-    filter: BiquadCoeffs,
-    fx1: f32, fx2: f32, fy1: f32, fy2: f32,
-
     volume:      f32,
     sample_rate: f64,
 }
@@ -119,8 +108,6 @@ impl Voice {
             stage: Stage::Idle, env_level: 0.0, env_time: 0.0,
             attack: 0.01, decay: 0.15, sustain: 0.7, release: 0.4,
             release_lvl: 0.0,
-            filter: BiquadCoeffs::default(),
-            fx1: 0.0, fx2: 0.0, fy1: 0.0, fy2: 0.0,
             volume: 0.75,
             sample_rate,
         }
@@ -143,9 +130,6 @@ impl Voice {
         self.release   = params.release;
         // Scale volume by velocity
         self.volume    = params.volume * velocity;
-
-        self.filter    = BiquadCoeffs::low_pass(params.cutoff, params.resonance, self.sample_rate);
-        self.fx1 = 0.0; self.fx2 = 0.0; self.fy1 = 0.0; self.fy2 = 0.0;
 
         self.stage     = Stage::Attack;
         self.env_time  = 0.0;
@@ -170,8 +154,7 @@ impl Voice {
         for s in buf[..n].iter_mut() {
             let env = self.tick_env(dt);
             let osc = self.tick_osc();
-            let flt = self.filter.tick(osc, &mut self.fx1, &mut self.fx2, &mut self.fy1, &mut self.fy2);
-            *s += flt * env * self.volume;
+            *s += osc * env * self.volume;
             self.phase = (self.phase + phase_inc).fract();
         }
 

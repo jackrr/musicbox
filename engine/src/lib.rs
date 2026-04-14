@@ -136,14 +136,12 @@ pub unsafe extern "C" fn musicbox_engine_send_command(
         2 => { // SetVoiceParam
             if let Some(tp) = e.track_params.get_mut(track_id as usize) {
                 match param_a {
-                    0 => tp.osc_type  = synth::voice::OscType::from_f32(value),
-                    1 => tp.attack    = value,
-                    2 => tp.decay     = value,
-                    3 => tp.sustain   = value,
-                    4 => tp.release   = value,
-                    5 => tp.cutoff    = value,
-                    6 => tp.resonance = value,
-                    7 => tp.volume    = value,
+                    0 => tp.osc_type = synth::voice::OscType::from_f32(value),
+                    1 => tp.attack   = value,
+                    2 => tp.decay    = value,
+                    3 => tp.sustain  = value,
+                    4 => tp.release  = value,
+                    5 => tp.volume   = value,
                     _ => {}
                 }
             }

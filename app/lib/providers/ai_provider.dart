@@ -140,8 +140,6 @@ Return ONLY a JSON object with this exact structure, no explanation:
   "decay": 0.001-10.0,
   "sustain": 0.0-1.0,
   "release": 0.001-10.0,
-  "cutoff": 0.0-1.0,
-  "resonance": 0.0-1.0,
   "volume": 0.0-1.0
 }
 oscType: 0=sine, 1=saw, 2=square, 3=triangle, 4=noise.
@@ -167,8 +165,6 @@ oscType: 0=sine, 1=saw, 2=square, 3=triangle, 4=noise.
       if (json.containsKey('decay'))     apply(VoiceParam.decay,     json['decay']);
       if (json.containsKey('sustain'))   apply(VoiceParam.sustain,   json['sustain']);
       if (json.containsKey('release'))   apply(VoiceParam.release,   json['release']);
-      if (json.containsKey('cutoff'))    apply(VoiceParam.cutoff,    json['cutoff']);
-      if (json.containsKey('resonance')) apply(VoiceParam.resonance, json['resonance']);
       if (json.containsKey('volume'))    apply(VoiceParam.volume,    json['volume']);
 
       _appendAssistant('Sound design applied to track $trackId!');

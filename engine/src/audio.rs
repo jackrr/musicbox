@@ -4,31 +4,31 @@ use std::sync::mpsc;
 use crate::commands::{Command, EffectParam, FfiCommand};
 use crate::effects::EffectsChain;
 use crate::sampler::{SampleMsg, Sampler};
-use crate::sequencer::Sequencer;
+use crate::sequencer::{Sequencer, NUM_TRACKS};
 use crate::synth::VoicePool;
 
-const MAX_FRAMES: usize = 8192;
+pub const MAX_FRAMES: usize = 8192;
 
 /// All real-time audio state. Owned by the audio callback closure.
 struct AudioState {
-    pool:      VoicePool,
-    sampler:   Sampler,
-    sequencer: Sequencer,
-    effects:   EffectsChain,
-    channels:  usize,
-    /// Pre-allocated stereo f32 output buffer (no heap alloc in hot path).
-    out_buf:   Box<[f32; MAX_FRAMES * 2]>,
+    pool:        VoicePool,
+    sampler:     Sampler,
+    sequencer:   Sequencer,
+    effects:     EffectsChain,
+    channels:    usize,
+    /// Pre-allocated per-track mono buffers (no heap alloc in hot path).
+    track_bufs:  Vec<Vec<f32>>,
 }
 
 impl AudioState {
     fn new(sample_rate: f64, channels: usize) -> Self {
         Self {
-            pool:      VoicePool::new(sample_rate),
-            sampler:   Sampler::new(sample_rate),
-            sequencer: Sequencer::new(sample_rate),
-            effects:   EffectsChain::new(sample_rate),
+            pool:       VoicePool::new(sample_rate),
+            sampler:    Sampler::new(sample_rate),
+            sequencer:  Sequencer::new(sample_rate),
+            effects:    EffectsChain::new(sample_rate),
             channels,
-            out_buf:   Box::new([0.0; MAX_FRAMES * 2]),
+            track_bufs: (0..NUM_TRACKS).map(|_| vec![0.0f32; MAX_FRAMES]).collect(),
         }
     }
 
@@ -54,18 +54,50 @@ impl AudioState {
                 let beats = self.effects.track_fx[0].delay_time_beats;
                 self.effects.set_bpm(bpm, beats);
             }
-            SetTransport(state) => self.sequencer.set_transport(state),
+            SetTransport(state) => {
+                if matches!(state, crate::commands::TransportState::Stop) {
+                    self.sequencer.drain_notes(&mut self.pool, &mut self.sampler);
+                }
+                self.sequencer.set_transport(state);
+            }
             SetStep { track_id, step_idx, pitch, velocity } => {
                 self.sequencer.set_step(track_id, step_idx, pitch, velocity);
             }
             SetEffect { track_id, param, value } => {
-                if let Some(fx) = self.effects.track_fx.get_mut(track_id as usize) {
-                    match param {
-                        EffectParam::ReverbSend    => fx.reverb_send      = value.clamp(0.0, 1.0),
-                        EffectParam::DelaySend     => fx.delay_send       = value.clamp(0.0, 1.0),
-                        EffectParam::DelayTime     => { fx.delay_time_beats = value.clamp(0.0625, 4.0); self.effects.set_bpm(self.sequencer.bpm(), value); }
-                        EffectParam::DelayFeedback => fx.delay_feedback   = value.clamp(0.0, 0.95),
-                        EffectParam::DistDrive     => fx.dist_drive       = value.clamp(0.0, 1.0),
+                match param {
+                    EffectParam::ReverbRoom => {
+                        self.effects.reverb.set_room(value, self.effects.reverb.damping);
+                    }
+                    EffectParam::ReverbDamp => {
+                        self.effects.reverb.set_room(self.effects.reverb.room_size, value);
+                    }
+                    _ => {
+                        if let Some(fx) = self.effects.track_fx.get_mut(track_id as usize) {
+                            match param {
+                                EffectParam::ReverbSend    => fx.reverb_send      = value.clamp(0.0, 1.0),
+                                EffectParam::DelaySend     => fx.delay_send       = value.clamp(0.0, 1.0),
+                                EffectParam::DelayTime     => {
+                                    fx.delay_time_beats = value.clamp(0.0625, 4.0);
+                                    self.effects.set_bpm(self.sequencer.bpm(), value);
+                                }
+                                EffectParam::DelayFeedback => fx.delay_feedback   = value.clamp(0.0, 0.95),
+                                EffectParam::DistDrive     => fx.dist_drive       = value.clamp(0.0, 1.0),
+                                EffectParam::FilterType    => {
+                                    fx.filter_mode = value as u8;
+                                    self.effects.update_filter(track_id);
+                                }
+                                EffectParam::FilterCutoff  => {
+                                    fx.filter_cutoff = value.clamp(0.0, 1.0);
+                                    self.effects.update_filter(track_id);
+                                }
+                                EffectParam::FilterResonance => {
+                                    fx.filter_resonance = value.clamp(0.0, 1.0);
+                                    self.effects.update_filter(track_id);
+                                }
+                                // Already handled above
+                                EffectParam::ReverbRoom | EffectParam::ReverbDamp => {}
+                            }
+                        }
                     }
                 }
             }
@@ -93,22 +125,17 @@ impl AudioState {
         // 3. Advance sequencer clock (fires NoteOn/Off into pool & sampler)
         self.sequencer.advance(n_frames, &mut self.pool, &mut self.sampler);
 
-        // 4. Render synth + sampler into pre-allocated f32 buffer
+        // 4. Render each track into its own pre-allocated mono buffer
         let frames = n_frames.min(MAX_FRAMES);
-        let buf = &mut self.out_buf[..frames * self.channels];
-        buf.fill(0.0);
-        self.pool.render(buf, frames, self.channels);
-        self.sampler.render(buf, frames, self.channels);
+        for t in 0..NUM_TRACKS {
+            let buf = &mut self.track_bufs[t];
+            buf[..frames].fill(0.0);
+            self.pool.render_track(t as u8, &mut buf[..frames], frames);
+            self.sampler.render_track(t as u8, &mut buf[..frames], frames);
+        }
 
-        // 5. Apply effects
-        let sends: Vec<(f32, f32, f32)> = self.effects.track_fx
-            .iter()
-            .map(|fx| (fx.reverb_send, fx.delay_send, fx.dist_drive))
-            .collect();
-        self.effects.process(buf, frames, self.channels, &sends);
-
-        // 6. Write to device output buffer (convert f32 → T happens in build_stream)
-        output[..buf.len()].copy_from_slice(buf);
+        // 5. Mix tracks through effects chain into output
+        self.effects.process_tracks(&self.track_bufs, frames, self.channels, output);
     }
 }
 

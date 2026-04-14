@@ -71,6 +71,20 @@ impl Sequencer {
         }
     }
 
+    /// Fire NoteOff for any notes that are still held, then clear them.
+    /// Call this when transport stops to prevent stuck notes.
+    pub fn drain_notes(&mut self, pool: &mut VoicePool, sampler: &mut Sampler) {
+        for (track_id, note) in self.active_notes.iter_mut().enumerate() {
+            if let Some(pitch) = note.take() {
+                if sampler.has_sample(track_id as u8) {
+                    sampler.note_off(track_id as u8);
+                } else {
+                    pool.note_off(track_id as u8, pitch);
+                }
+            }
+        }
+    }
+
     pub fn set_step(&mut self, track_id: u8, step_idx: u8, pitch: u8, velocity: f32) {
         let (ti, si) = (track_id as usize, step_idx as usize);
         if ti < NUM_TRACKS && si < MAX_STEPS {

@@ -21,6 +21,16 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
     ref.read(projectProvider.notifier).updateEffect(_selectedTrack, param, value);
   }
 
+  void _setGlobal(EffectParam param, double value) {
+    // Global params are sent with track_id=0; the engine ignores track_id for these.
+    ref.read(engineProvider).setEffect(0, param, value);
+    if (param == EffectParam.reverbRoom) {
+      ref.read(projectProvider.notifier).updateReverbRoom(value);
+    } else if (param == EffectParam.reverbDamp) {
+      ref.read(projectProvider.notifier).updateReverbDamp(value);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final projectAsync = ref.watch(projectProvider);
@@ -76,6 +86,7 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // ---- Reverb ----------------------------------------
                         _EffectSection(
                           title: 'REVERB',
                           color: const Color(0xFF4FC3F7),
@@ -85,11 +96,22 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
                               value: fx.reverbSend,
                               onChanged: (v) => _setEffect(EffectParam.reverbSend, v),
                             ),
+                            _EffectSlider(
+                              label: 'Room (global)',
+                              value: project.reverbRoom,
+                              onChanged: (v) => _setGlobal(EffectParam.reverbRoom, v),
+                            ),
+                            _EffectSlider(
+                              label: 'Damp (global)',
+                              value: project.reverbDamp,
+                              onChanged: (v) => _setGlobal(EffectParam.reverbDamp, v),
+                            ),
                           ],
                         ),
 
                         const SizedBox(height: 16),
 
+                        // ---- Delay -----------------------------------------
                         _EffectSection(
                           title: 'DELAY',
                           color: const Color(0xFFFFB74D),
@@ -116,6 +138,7 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
 
                         const SizedBox(height: 16),
 
+                        // ---- Distortion ------------------------------------
                         _EffectSection(
                           title: 'DISTORTION',
                           color: const Color(0xFFEF9A9A),
@@ -124,6 +147,30 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
                               label: 'Drive',
                               value: fx.distDrive,
                               onChanged: (v) => _setEffect(EffectParam.distDrive, v),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // ---- Filter ----------------------------------------
+                        _EffectSection(
+                          title: 'FILTER',
+                          color: const Color(0xFFA5D6A7),
+                          children: [
+                            _FilterTypeSelector(
+                              value: fx.filterMode,
+                              onChanged: (v) => _setEffect(EffectParam.filterType, v.toDouble()),
+                            ),
+                            _EffectSlider(
+                              label: 'Cutoff',
+                              value: fx.filterCutoff,
+                              onChanged: (v) => _setEffect(EffectParam.filterCutoff, v),
+                            ),
+                            _EffectSlider(
+                              label: 'Resonance',
+                              value: fx.filterResonance,
+                              onChanged: (v) => _setEffect(EffectParam.filterResonance, v),
                             ),
                           ],
                         ),
@@ -139,6 +186,8 @@ class _EffectsPageState extends ConsumerState<EffectsPage> {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
 
 class _EffectSection extends StatelessWidget {
   final String title;
@@ -176,6 +225,56 @@ class _EffectSection extends StatelessWidget {
       ),
     ],
   );
+}
+
+class _FilterTypeSelector extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _FilterTypeSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = ['OFF', 'LP', 'HP'];
+    const color = Color(0xFFA5D6A7);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 100,
+            child: Text('Type', style: TextStyle(fontSize: 11, color: Colors.white54)),
+          ),
+          ...List.generate(3, (i) {
+            final sel = value == i;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 100),
+                  margin: const EdgeInsets.only(right: 4),
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: sel ? color : Colors.white10,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    labels[i],
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: sel ? Colors.black : Colors.white54,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
 }
 
 class _EffectSlider extends StatelessWidget {

@@ -1,4 +1,5 @@
 use crate::sequencer::NUM_TRACKS;
+use crate::synth::filter::BiquadCoeffs;
 
 /// Per-track effect parameters.
 #[derive(Clone, Copy, Debug)]
@@ -7,13 +8,19 @@ pub struct TrackEffects {
     pub delay_send:       f32, // 0..1
     pub delay_time_beats: f32, // fraction of a beat (0.25 = 16th note)
     pub delay_feedback:   f32, // 0..1
-    pub dist_drive:       f32, // 0..1
+    pub dist_drive:       f32, // 0..1 — 0=off, 1=max drive
+    pub filter_mode:      u8,  // 0=off, 1=low-pass, 2=high-pass
+    pub filter_cutoff:    f32, // 0..1 normalised (20 Hz..20 kHz log)
+    pub filter_resonance: f32, // 0..1 normalised (Q 0.5..20)
 }
 
 impl Default for TrackEffects {
     fn default() -> Self {
-        Self { reverb_send: 0.0, delay_send: 0.0, delay_time_beats: 0.5,
-               delay_feedback: 0.4, dist_drive: 0.0 }
+        Self {
+            reverb_send: 0.0, delay_send: 0.0, delay_time_beats: 0.5,
+            delay_feedback: 0.4, dist_drive: 0.0,
+            filter_mode: 0, filter_cutoff: 0.5, filter_resonance: 0.0,
+        }
     }
 }
 
@@ -59,10 +66,10 @@ impl AllpassFilter {
 }
 
 pub struct Reverb {
-    combs:    [CombFilter; 8],
+    combs:     [CombFilter; 8],
     allpasses: [AllpassFilter; 4],
-    room_size: f32,
-    damping:   f32,
+    pub room_size: f32,
+    pub damping:   f32,
 }
 
 impl Reverb {
@@ -105,10 +112,10 @@ impl Reverb {
 const MAX_DELAY_SAMPLES: usize = 96000; // 2 s at 48 kHz
 
 pub struct Delay {
-    buf:      Box<[f32; MAX_DELAY_SAMPLES]>,
-    write:    usize,
+    buf:           Box<[f32; MAX_DELAY_SAMPLES]>,
+    write:         usize,
     delay_samples: usize,
-    feedback: f32,
+    feedback:      f32,
 }
 
 impl Delay {
@@ -138,23 +145,48 @@ impl Delay {
 }
 
 // ---------------------------------------------------------------------------
+// Per-track filter state
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+struct TrackFilter {
+    coeffs: BiquadCoeffs,
+    x1: f32, x2: f32, y1: f32, y2: f32,
+}
+
+impl TrackFilter {
+    fn new() -> Self {
+        Self { coeffs: BiquadCoeffs::default(), x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
+    }
+    #[inline]
+    fn tick(&mut self, x: f32) -> f32 {
+        self.coeffs.tick(x, &mut self.x1, &mut self.x2, &mut self.y1, &mut self.y2)
+    }
+    fn reset(&mut self) {
+        self.x1 = 0.0; self.x2 = 0.0; self.y1 = 0.0; self.y2 = 0.0;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Effects chain — one reverb + one delay shared across all tracks.
-// Tracks send to reverb/delay via send levels.
+// Each track has per-track dist, filter, and send levels.
 // ---------------------------------------------------------------------------
 
 pub struct EffectsChain {
-    pub track_fx: [TrackEffects; NUM_TRACKS],
-    reverb: Reverb,
-    delay:  Delay,
-    sample_rate: f64,
+    pub track_fx:     [TrackEffects; NUM_TRACKS],
+    pub reverb:       Reverb,
+    delay:            Delay,
+    track_filters:    [TrackFilter; NUM_TRACKS],
+    sample_rate:      f64,
 }
 
 impl EffectsChain {
     pub fn new(sample_rate: f64) -> Self {
         Self {
-            track_fx: std::array::from_fn(|_| TrackEffects::default()),
-            reverb: Reverb::new(),
-            delay:  Delay::new(),
+            track_fx:      std::array::from_fn(|_| TrackEffects::default()),
+            reverb:        Reverb::new(),
+            delay:         Delay::new(),
+            track_filters: std::array::from_fn(|_| TrackFilter::new()),
             sample_rate,
         }
     }
@@ -164,39 +196,70 @@ impl EffectsChain {
         self.delay.set_time_samples(samples);
     }
 
-    /// Process the interleaved stereo output buffer in place.
-    /// For each frame, accumulate reverb and delay sends from track dry signals
-    /// (approximated from the mixed output — a send-style effect).
-    pub fn process(&mut self, output: &mut [f32], n_frames: usize, channels: usize,
-                   track_sends: &[(f32, f32, f32)]) // (reverb_send, delay_send, dist_drive) per track
-    {
-        // We apply effects to the stereo mix. For a more accurate send model,
-        // you'd need per-track dry buffers, which we'll add in a future pass.
-        // For now: one reverb and one delay on the master bus.
+    /// Recompute filter coefficients for a track after its params change.
+    pub fn update_filter(&mut self, track_id: u8) {
+        let t = track_id as usize;
+        if t >= NUM_TRACKS { return; }
+        let fx = &self.track_fx[t];
+        let coeffs = match fx.filter_mode {
+            1 => BiquadCoeffs::low_pass(fx.filter_cutoff, fx.filter_resonance, self.sample_rate),
+            2 => BiquadCoeffs::high_pass(fx.filter_cutoff, fx.filter_resonance, self.sample_rate),
+            _ => BiquadCoeffs::default(),
+        };
+        self.track_filters[t].coeffs = coeffs;
+        self.track_filters[t].reset();
+    }
 
-        // Compute average sends across all active tracks
-        let mut rev_sum = 0.0f32;
-        let mut del_sum = 0.0f32;
-        for (r, d, _) in track_sends.iter() { rev_sum += r; del_sum += d; }
-        let n = track_sends.len().max(1) as f32;
-        let rev_wet = (rev_sum / n).min(1.0);
-        let del_wet = (del_sum / n).min(1.0);
-
+    /// Process per-track mono buffers into the interleaved stereo output.
+    ///
+    /// Each track's dry signal is:
+    ///   1. Soft-clipped with drive if dist_drive > 0
+    ///   2. Filtered (LP or HP) if filter_mode != 0
+    ///   3. Sent to reverb and delay buses via individual send levels
+    ///
+    /// Final output = sum(track dry) + reverb wet + delay wet, soft-clipped.
+    pub fn process_tracks(
+        &mut self,
+        track_bufs: &[Vec<f32>],
+        n_frames:   usize,
+        channels:   usize,
+        output:     &mut [f32],
+    ) {
         for f in 0..n_frames {
-            let mono = if channels == 1 {
-                output[f]
-            } else {
-                (output[f * channels] + output[f * channels + 1]) * 0.5
-            };
+            let mut dry_sum     = 0.0f32;
+            let mut reverb_send = 0.0f32;
+            let mut delay_send  = 0.0f32;
 
-            let rev = self.reverb.tick(mono) * rev_wet;
-            let del = self.delay.tick(mono)  * del_wet;
+            for t in 0..NUM_TRACKS {
+                let fx  = &self.track_fx[t];
+                let raw = if f < track_bufs[t].len() { track_bufs[t][f] } else { 0.0 };
+
+                // 1. Distortion
+                let driven = if fx.dist_drive > 0.0 {
+                    (raw * (1.0 + fx.dist_drive * 9.0)).tanh()
+                } else {
+                    raw
+                };
+
+                // 2. Per-track filter
+                let filtered = if fx.filter_mode != 0 {
+                    self.track_filters[t].tick(driven)
+                } else {
+                    driven
+                };
+
+                dry_sum     += filtered;
+                reverb_send += filtered * fx.reverb_send;
+                delay_send  += filtered * fx.delay_send;
+            }
+
+            let rev = self.reverb.tick(reverb_send);
+            let del = self.delay.tick(delay_send);
+            let out = soft_clip(dry_sum + rev + del);
 
             for ch in 0..channels {
                 let i = f * channels + ch;
-                if i < output.len() {
-                    output[i] = soft_clip(output[i] + rev + del);
-                }
+                if i < output.len() { output[i] = out; }
             }
         }
     }

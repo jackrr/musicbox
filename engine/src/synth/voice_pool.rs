@@ -4,16 +4,10 @@ use crate::synth::voice::{TrackParams, Voice};
 pub const NUM_VOICES: usize = 16;
 pub const NUM_TRACKS: usize = 8;
 
-/// Maximum frames per audio callback. Pre-allocate scratch to avoid
-/// heap allocation inside the real-time audio thread.
-const MAX_FRAMES: usize = 8192;
-
 pub struct VoicePool {
     voices:       [Voice; NUM_VOICES],
     track_params: [TrackParams; NUM_TRACKS],
     voice_age:    u64,
-    /// Mono mix scratch — pre-allocated, reused every callback.
-    scratch:      Box<[f32; MAX_FRAMES]>,
 }
 
 impl VoicePool {
@@ -22,7 +16,6 @@ impl VoicePool {
             voices:       std::array::from_fn(|_| Voice::new(sample_rate)),
             track_params: std::array::from_fn(|_| TrackParams::default()),
             voice_age:    0,
-            scratch:      Box::new([0.0f32; MAX_FRAMES]),
         }
     }
 
@@ -43,29 +36,11 @@ impl VoicePool {
         }
     }
 
-    /// Render all active voices into `output` (interleaved, pre-zeroed by caller).
-    ///
-    /// Applies a tanh soft-clip on the stereo sum to prevent hard clipping
-    /// when many voices play simultaneously.
-    pub fn render(&mut self, output: &mut [f32], n_frames: usize, channels: usize) {
-        let frames = n_frames.min(MAX_FRAMES);
-        let scratch = &mut self.scratch[..frames];
-        scratch.fill(0.0);
-
+    /// Render all active voices for `track_id` into `buf` (mono, pre-zeroed by caller).
+    pub fn render_track(&mut self, track_id: u8, buf: &mut [f32], n: usize) {
         for voice in self.voices.iter_mut() {
-            if voice.active {
-                voice.render(scratch, frames);
-            }
-        }
-
-        // Scatter mono scratch → interleaved output with soft-clip
-        for (f, &mono) in scratch.iter().enumerate() {
-            let clipped = soft_clip(mono);
-            for ch in 0..channels {
-                let idx = f * channels + ch;
-                if idx < output.len() {
-                    output[idx] = clipped;
-                }
+            if voice.active && voice.track_id == track_id {
+                voice.render(buf, n);
             }
         }
     }
@@ -99,10 +74,4 @@ impl VoicePool {
             }
         }
     }
-}
-
-/// Tanh soft-clipper: keeps output in (-1, 1) without hard-clipping.
-#[inline]
-fn soft_clip(x: f32) -> f32 {
-    x.tanh()
 }

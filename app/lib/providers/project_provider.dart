@@ -34,8 +34,10 @@ class ProjectNotifier extends AsyncNotifier<Project> {
     });
   }
 
-  void updateBpm(double bpm)      => _update((p) => p.copyWith(bpm: bpm));
-  void updateNumSteps(int n)      => _update((p) => p.copyWith(numSteps: n));
+  void updateBpm(double bpm)    => _update((p) => p.copyWith(bpm: bpm));
+  void updateNumSteps(int n)    => _update((p) => p.copyWith(numSteps: n));
+  void updateReverbRoom(double v) => _update((p) => p.copyWith(reverbRoom: v));
+  void updateReverbDamp(double v) => _update((p) => p.copyWith(reverbDamp: v));
 
   void updateStep(int trackId, int stepIdx, StepData step) => _update((p) {
     final tracks = List<TrackConfig>.from(p.tracks);
@@ -51,14 +53,12 @@ class ProjectNotifier extends AsyncNotifier<Project> {
     final vp = tracks[trackId].voiceParams;
     tracks[trackId] = tracks[trackId].copyWith(
       voiceParams: switch (param) {
-        VoiceParam.oscType   => vp.copyWith(oscType: OscType.values[value.round()]),
-        VoiceParam.attack    => vp.copyWith(attack: value),
-        VoiceParam.decay     => vp.copyWith(decay: value),
-        VoiceParam.sustain   => vp.copyWith(sustain: value),
-        VoiceParam.release   => vp.copyWith(release: value),
-        VoiceParam.cutoff    => vp.copyWith(cutoff: value),
-        VoiceParam.resonance => vp.copyWith(resonance: value),
-        VoiceParam.volume    => vp.copyWith(volume: value),
+        VoiceParam.oscType  => vp.copyWith(oscType: OscType.values[value.round()]),
+        VoiceParam.attack   => vp.copyWith(attack: value),
+        VoiceParam.decay    => vp.copyWith(decay: value),
+        VoiceParam.sustain  => vp.copyWith(sustain: value),
+        VoiceParam.release  => vp.copyWith(release: value),
+        VoiceParam.volume   => vp.copyWith(volume: value),
       },
     );
     return p.copyWith(tracks: tracks);
@@ -70,11 +70,16 @@ class ProjectNotifier extends AsyncNotifier<Project> {
     final fx = tracks[trackId].effects;
     tracks[trackId] = tracks[trackId].copyWith(
       effects: switch (param) {
-        EffectParam.reverbSend    => fx.copyWith(reverbSend: value),
-        EffectParam.delaySend     => fx.copyWith(delaySend: value),
-        EffectParam.delayTime     => fx.copyWith(delayTime: value),
-        EffectParam.delayFeedback => fx.copyWith(delayFeedback: value),
-        EffectParam.distDrive     => fx.copyWith(distDrive: value),
+        EffectParam.reverbSend     => fx.copyWith(reverbSend: value),
+        EffectParam.delaySend      => fx.copyWith(delaySend: value),
+        EffectParam.delayTime      => fx.copyWith(delayTime: value),
+        EffectParam.delayFeedback  => fx.copyWith(delayFeedback: value),
+        EffectParam.distDrive      => fx.copyWith(distDrive: value),
+        EffectParam.filterType     => fx.copyWith(filterMode: value.round()),
+        EffectParam.filterCutoff   => fx.copyWith(filterCutoff: value),
+        EffectParam.filterResonance => fx.copyWith(filterResonance: value),
+        // Global params handled separately — don't update track effects
+        EffectParam.reverbRoom || EffectParam.reverbDamp => fx,
       },
     );
     return p.copyWith(tracks: tracks);

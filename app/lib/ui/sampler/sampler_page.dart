@@ -88,7 +88,14 @@ class _SamplePad extends ConsumerWidget {
         : 'T${trackIndex + 1}  —  empty';
 
     return GestureDetector(
-      onTap: () => ref.read(engineProvider).noteOn(trackIndex, 60, 100),
+      onTap: () {
+        final engine = ref.read(engineProvider);
+        engine.noteOn(trackIndex, 60, 100);
+        // If no sample is loaded the NoteOn routes to the synth; send NoteOff
+        // immediately so the voice decays through release rather than sustaining
+        // indefinitely.
+        if (!hasPath) engine.noteOff(trackIndex, 60);
+      },
       onLongPress: () => _pickSample(ref),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 100),

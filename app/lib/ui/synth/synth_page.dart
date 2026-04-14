@@ -5,6 +5,7 @@ import '../../engine/types.dart';
 import '../../models/project.dart';
 import '../../providers/engine_provider.dart';
 import '../../providers/project_provider.dart';
+import 'adsr_visualizer.dart';
 import 'keyboard.dart';
 
 class SynthPage extends ConsumerStatefulWidget {
@@ -55,21 +56,27 @@ class _SynthPageState extends ConsumerState<SynthPage> {
                           onChanged: (t) => _setParam(VoiceParam.oscType, t.index.toDouble()),
                         ),
 
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
 
-                        // ADSR + filter sliders
-                        _ParamRow(label: 'ATK', value: vp.attack,    min: 0.001, max: 4.0,
+                        // ADSR envelope visualizer
+                        AdsrVisualizer(
+                          attack:  vp.attack,
+                          decay:   vp.decay,
+                          sustain: vp.sustain,
+                          release: vp.release,
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // ADSR + volume sliders
+                        _ParamRow(label: 'ATK', value: vp.attack,  min: 0.001, max: 4.0,
                             onChanged: (v) => _setParam(VoiceParam.attack, v)),
-                        _ParamRow(label: 'DEC', value: vp.decay,     min: 0.001, max: 4.0,
+                        _ParamRow(label: 'DEC', value: vp.decay,   min: 0.001, max: 4.0,
                             onChanged: (v) => _setParam(VoiceParam.decay, v)),
                         _ParamRow(label: 'SUS', value: vp.sustain,
                             onChanged: (v) => _setParam(VoiceParam.sustain, v)),
-                        _ParamRow(label: 'REL', value: vp.release,   min: 0.01,  max: 8.0,
+                        _ParamRow(label: 'REL', value: vp.release, min: 0.01,  max: 8.0,
                             onChanged: (v) => _setParam(VoiceParam.release, v)),
-                        _ParamRow(label: 'CUT', value: vp.cutoff,
-                            onChanged: (v) => _setParam(VoiceParam.cutoff, v)),
-                        _ParamRow(label: 'RES', value: vp.resonance,
-                            onChanged: (v) => _setParam(VoiceParam.resonance, v)),
                         _ParamRow(label: 'VOL', value: vp.volume,
                             onChanged: (v) => _setParam(VoiceParam.volume, v)),
                       ],

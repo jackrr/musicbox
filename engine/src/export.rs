@@ -39,14 +39,12 @@ pub fn render_wav(
     for (ti, tp) in state.track_params.iter().enumerate() {
         use crate::commands::VoiceParam::*;
         for (p, v) in [
-            (OscType,   tp.osc_type as u8 as f32),
-            (Attack,    tp.attack),
-            (Decay,     tp.decay),
-            (Sustain,   tp.sustain),
-            (Release,   tp.release),
-            (Cutoff,    tp.cutoff),
-            (Resonance, tp.resonance),
-            (Volume,    tp.volume),
+            (OscType, tp.osc_type as u8 as f32),
+            (Attack,  tp.attack),
+            (Decay,   tp.decay),
+            (Sustain, tp.sustain),
+            (Release, tp.release),
+            (Volume,  tp.volume),
         ] {
             pool.handle(crate::commands::Command::SetVoiceParam {
                 track_id: ti as u8, param: p, value: v,
@@ -59,17 +57,27 @@ pub fn render_wav(
         bits_per_sample: 16, sample_format: hound::SampleFormat::Int,
     };
     let mut writer = hound::WavWriter::create(path, spec)?;
-    let mut buf    = vec![0.0f32; CHUNK * 2];
+    let mut mono_buf = vec![0.0f32; CHUNK];
+    let mut out_buf  = vec![0.0f32; CHUNK * 2];
 
     let mut rendered = 0usize;
     while rendered < total_samples {
         let n = CHUNK.min(total_samples - rendered);
-        buf[..n * 2].fill(0.0);
+        out_buf[..n * 2].fill(0.0);
         seq.advance(n, &mut pool, &mut sampler);
-        pool.render(&mut buf[..n * 2], n, 2);
-        sampler.render(&mut buf[..n * 2], n, 2);
 
-        for &s in &buf[..n * 2] {
+        for t in 0..NUM_TRACKS {
+            mono_buf[..n].fill(0.0);
+            pool.render_track(t as u8, &mut mono_buf[..n], n);
+            sampler.render_track(t as u8, &mut mono_buf[..n], n);
+            // Scatter mono → interleaved stereo
+            for f in 0..n {
+                out_buf[f * 2]     += mono_buf[f];
+                out_buf[f * 2 + 1] += mono_buf[f];
+            }
+        }
+
+        for &s in &out_buf[..n * 2] {
             writer.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
         }
 

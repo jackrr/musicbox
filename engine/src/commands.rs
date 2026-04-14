@@ -36,7 +36,7 @@ pub enum Command {
 #[repr(u8)]
 pub enum VoiceParam {
     OscType = 0, Attack = 1, Decay = 2, Sustain = 3,
-    Release = 4, Cutoff = 5, Resonance = 6, Volume = 7,
+    Release = 4, Volume = 5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,8 @@ pub enum VoiceParam {
 pub enum EffectParam {
     ReverbSend = 0, DelayTime = 1, DelayFeedback = 2,
     DelaySend = 3, DistDrive = 4,
+    ReverbRoom = 5, ReverbDamp = 6,
+    FilterType = 7, FilterCutoff = 8, FilterResonance = 9,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -87,15 +89,18 @@ impl FfiCommand {
 fn voice_param(v: u8) -> Option<VoiceParam> {
     Some(match v {
         0 => VoiceParam::OscType, 1 => VoiceParam::Attack, 2 => VoiceParam::Decay,
-        3 => VoiceParam::Sustain, 4 => VoiceParam::Release, 5 => VoiceParam::Cutoff,
-        6 => VoiceParam::Resonance, 7 => VoiceParam::Volume, _ => return None,
+        3 => VoiceParam::Sustain, 4 => VoiceParam::Release, 5 => VoiceParam::Volume,
+        _ => return None,
     })
 }
 
 fn effect_param(v: u8) -> Option<EffectParam> {
     Some(match v {
-        0 => EffectParam::ReverbSend, 1 => EffectParam::DelayTime,
+        0 => EffectParam::ReverbSend,    1 => EffectParam::DelayTime,
         2 => EffectParam::DelayFeedback, 3 => EffectParam::DelaySend,
-        4 => EffectParam::DistDrive, _ => return None,
+        4 => EffectParam::DistDrive,     5 => EffectParam::ReverbRoom,
+        6 => EffectParam::ReverbDamp,    7 => EffectParam::FilterType,
+        8 => EffectParam::FilterCutoff,  9 => EffectParam::FilterResonance,
+        _ => return None,
     })
 }
