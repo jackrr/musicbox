@@ -7,11 +7,9 @@ import '../../providers/engine_provider.dart';
 import '../../providers/project_provider.dart';
 import '../../providers/sequencer_provider.dart';
 
-// Fixed number of columns in every pad layout.
-const int kPadColumns = 2;
-const double kPadGap  = 10.0;
-// Visual aspect ratio for a 1×1 cell (width : height).
-const double kCellAspect = 1.5;
+const int    kPadColumns  = 2;
+const double kPadGap      = 10.0;
+const double kCellAspect  = 1.5; // width : height for a 1×1 cell
 
 class PadPage extends ConsumerStatefulWidget {
   const PadPage({super.key});
@@ -21,14 +19,13 @@ class PadPage extends ConsumerStatefulWidget {
 }
 
 class _PadPageState extends ConsumerState<PadPage> {
+  bool _editMode   = false;
   bool _recordMode = false;
 
   void _onPadDown(int trackId) {
     final engine   = ref.read(engineProvider);
     final playhead = ref.read(playheadProvider).value ?? -1;
-
     engine.noteOn(trackId, 60, 100);
-
     if (_recordMode && playhead >= 0) {
       ref.read(sequencerProvider.notifier).setStep(
         trackId, playhead,
@@ -37,19 +34,18 @@ class _PadPageState extends ConsumerState<PadPage> {
     }
   }
 
-  void _onPadUp(int trackId) {
-    ref.read(engineProvider).noteOff(trackId, 60);
-  }
+  void _onPadUp(int trackId) =>
+      ref.read(engineProvider).noteOff(trackId, 60);
 
   void _addLayout(BuildContext context) async {
-    final nameCtrl = TextEditingController(text: 'Layout');
+    final ctrl = TextEditingController(text: 'Layout');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         title: const Text('New Layout', style: TextStyle(color: Colors.white)),
         content: TextField(
-          controller: nameCtrl,
+          controller: ctrl,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             hintText: 'Layout name',
@@ -57,19 +53,15 @@ class _PadPageState extends ConsumerState<PadPage> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Add', style: TextStyle(color: Colors.greenAccent)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white38))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Add', style: TextStyle(color: Colors.greenAccent))),
         ],
       ),
     );
     if (ok == true) {
-      final name = nameCtrl.text.trim().isEmpty ? 'Layout' : nameCtrl.text.trim();
+      final name = ctrl.text.trim().isEmpty ? 'Layout' : ctrl.text.trim();
       ref.read(projectProvider.notifier).addPadLayout(
         PadLayout(name: name, cells: PadLayout.defaultLayout().cells),
       );
@@ -86,17 +78,18 @@ class _PadPageState extends ConsumerState<PadPage> {
     }
   }
 
-  void _swapCells(int layoutIdx, int fromIdx, int toIdx) {
+  void _swapCells(int layoutIdx, int fromTrackId, int toIdx) {
     final project = ref.read(projectProvider).value;
     if (project == null) return;
-    final layoutIndex = layoutIdx.clamp(0, project.padLayouts.length - 1);
-    final cells = List<PadCell>.from(project.padLayouts[layoutIndex].cells);
+    final li = layoutIdx.clamp(0, project.padLayouts.length - 1);
+    final cells = List<PadCell>.from(project.padLayouts[li].cells);
+    final fromIdx = cells.indexWhere((c) => c.trackId == fromTrackId);
     if (fromIdx < 0 || toIdx < 0 || fromIdx >= cells.length || toIdx >= cells.length) return;
-    final tmp = cells[fromIdx];
-    cells[fromIdx] = cells[toIdx];
-    cells[toIdx]   = tmp;
+    final tmp       = cells[fromIdx];
+    cells[fromIdx]  = cells[toIdx];
+    cells[toIdx]    = tmp;
     for (var i = 0; i < cells.length; i++) {
-      ref.read(projectProvider.notifier).updatePadCell(layoutIndex, i, cells[i]);
+      ref.read(projectProvider.notifier).updatePadCell(li, i, cells[i]);
     }
   }
 
@@ -109,7 +102,7 @@ class _PadPageState extends ConsumerState<PadPage> {
       body: SafeArea(
         child: projectAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('$e')),
+          error:   (e, _) => Center(child: Text('$e')),
           data: (project) {
             final layoutIdx = project.activePadLayout
                 .clamp(0, project.padLayouts.length - 1);
@@ -120,24 +113,28 @@ class _PadPageState extends ConsumerState<PadPage> {
                 _LayoutPicker(
                   layouts:        project.padLayouts,
                   activeIdx:      layoutIdx,
+                  editMode:       _editMode,
                   recordMode:     _recordMode,
                   onSelect:       (i) => ref.read(projectProvider.notifier)
                                            .setActivePadLayout(i),
                   onAdd:          () => _addLayout(context),
+                  onToggleEdit:   () => setState(() => _editMode = !_editMode),
                   onToggleRecord: () => setState(() => _recordMode = !_recordMode),
                 ),
                 const Divider(height: 1, color: Colors.white12),
                 Expanded(
-                  child: Padding(
+                  child: SingleChildScrollView(
                     padding: const EdgeInsets.all(14),
                     child: _PadGrid(
                       layout:    layout,
                       layoutIdx: layoutIdx,
+                      editMode:  _editMode,
                       onDown:    _onPadDown,
                       onUp:      _onPadUp,
-                      onEdit:    (cellIdx, cell) =>
-                          _editCell(context, layoutIdx, cellIdx, cell),
-                      onSwap:    (a, b) => _swapCells(layoutIdx, a, b),
+                      onEdit:    (ci, cell) =>
+                          _editCell(context, layoutIdx, ci, cell),
+                      onSwap:    (fromTid, toIdx) =>
+                          _swapCells(layoutIdx, fromTid, toIdx),
                     ),
                   ),
                 ),
@@ -156,20 +153,61 @@ class _PadPageState extends ConsumerState<PadPage> {
 
 class _LayoutPicker extends StatelessWidget {
   final List<PadLayout> layouts;
-  final int activeIdx;
+  final int  activeIdx;
+  final bool editMode;
   final bool recordMode;
   final ValueChanged<int> onSelect;
   final VoidCallback onAdd;
+  final VoidCallback onToggleEdit;
   final VoidCallback onToggleRecord;
 
   const _LayoutPicker({
     required this.layouts,
     required this.activeIdx,
+    required this.editMode,
     required this.recordMode,
     required this.onSelect,
     required this.onAdd,
+    required this.onToggleEdit,
     required this.onToggleRecord,
   });
+
+  Widget _chip({
+    required String label,
+    required bool active,
+    required Color color,
+    required VoidCallback onTap,
+    IconData? icon,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? color.withAlpha(40) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: active ? color : Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 10, color: active ? color : Colors.white38),
+              const SizedBox(width: 4),
+            ],
+            Text(label, style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+              color: active ? color : Colors.white38,
+            )),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -177,6 +215,7 @@ class _LayoutPicker extends StatelessWidget {
       height: 44,
       child: Row(
         children: [
+          // Layout tabs
           Expanded(
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
@@ -191,23 +230,17 @@ class _LayoutPicker extends StatelessWidget {
                     margin: const EdgeInsets.only(right: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      color: sel
-                          ? Colors.greenAccent.withAlpha(30)
-                          : Colors.transparent,
+                      color: sel ? Colors.greenAccent.withAlpha(30) : Colors.transparent,
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(
-                        color: sel ? Colors.greenAccent : Colors.white24,
-                      ),
+                        color: sel ? Colors.greenAccent : Colors.white24),
                     ),
-                    child: Text(
-                      layouts[i].name,
+                    child: Text(layouts[i].name,
                       style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 11, fontWeight: FontWeight.bold,
                         color: sel ? Colors.greenAccent : Colors.white38,
                         letterSpacing: 1,
-                      ),
-                    ),
+                      )),
                   ),
                 );
               },
@@ -218,39 +251,21 @@ class _LayoutPicker extends StatelessWidget {
             tooltip: 'New layout',
             onPressed: onAdd,
           ),
-          GestureDetector(
-            onTap: onToggleRecord,
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: recordMode
-                    ? Colors.redAccent.withAlpha(40)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: recordMode ? Colors.redAccent : Colors.white24),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.fiber_manual_record,
-                    size: 10,
-                    color: recordMode ? Colors.redAccent : Colors.white38),
-                  const SizedBox(width: 4),
-                  Text(
-                    'REC',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: recordMode ? Colors.redAccent : Colors.white38,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          _chip(
+            label: 'EDIT',
+            active: editMode,
+            color: Colors.amberAccent,
+            icon: Icons.edit_outlined,
+            onTap: onToggleEdit,
           ),
+          _chip(
+            label: 'REC',
+            active: recordMode,
+            color: Colors.redAccent,
+            icon: Icons.fiber_manual_record,
+            onTap: onToggleRecord,
+          ),
+          const SizedBox(width: 6),
         ],
       ),
     );
@@ -258,10 +273,7 @@ class _LayoutPicker extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Grid layout engine
-//
-// Computes CSS-grid-style auto-placement for variable-span cells.
-// Returns a list of (row, col, colSpan, rowSpan) placements in cell order.
+// CSS-grid-style auto-placement
 // ---------------------------------------------------------------------------
 
 class _Placement {
@@ -270,8 +282,7 @@ class _Placement {
 }
 
 List<_Placement> _computePlacements(List<PadCell> cells) {
-  // occupied[row] is a bitmask of occupied columns (up to kPadColumns bits)
-  final occupied = <int>[0]; // one row initially
+  final occupied = <int>[0];
 
   bool canPlace(int row, int col, int cs, int rs) {
     if (col + cs > kPadColumns) return false;
@@ -313,20 +324,22 @@ List<_Placement> _computePlacements(List<PadCell> cells) {
 }
 
 // ---------------------------------------------------------------------------
-// Pad grid widget
+// Pad grid
 // ---------------------------------------------------------------------------
 
 class _PadGrid extends StatelessWidget {
   final PadLayout layout;
-  final int layoutIdx;
+  final int       layoutIdx;
+  final bool      editMode;
   final ValueChanged<int> onDown;
   final ValueChanged<int> onUp;
   final void Function(int cellIdx, PadCell cell) onEdit;
-  final void Function(int fromIdx, int toIdx) onSwap;
+  final void Function(int fromTrackId, int toIdx) onSwap;
 
   const _PadGrid({
     required this.layout,
     required this.layoutIdx,
+    required this.editMode,
     required this.onDown,
     required this.onUp,
     required this.onEdit,
@@ -337,35 +350,26 @@ class _PadGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final cells      = layout.cells;
     final placements = _computePlacements(cells);
-    final numRows    = placements.isEmpty
-        ? 1
-        : placements.map((p) {
-            final i = placements.indexOf(p);
-            return p.row + cells[i].rowSpan.clamp(1, 8);
-          }).reduce((a, b) => a > b ? a : b);
+
+    if (cells.isEmpty) return const SizedBox.shrink();
+
+    final numRows = Iterable.generate(cells.length)
+        .map((i) => placements[i].row + cells[i].rowSpan.clamp(1, 8))
+        .reduce((a, b) => a > b ? a : b);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final totalWidth  = constraints.maxWidth;
-        final cellW = (totalWidth - (kPadColumns - 1) * kPadGap) / kPadColumns;
+        final cellW = (constraints.maxWidth - (kPadColumns - 1) * kPadGap) / kPadColumns;
         final cellH = cellW / kCellAspect;
-        final totalHeight = numRows * cellH + (numRows - 1) * kPadGap;
 
         return SizedBox(
-          width:  totalWidth,
-          height: totalHeight,
+          width:  constraints.maxWidth,
+          height: numRows * cellH + (numRows - 1) * kPadGap,
           child: Stack(
             children: [
               for (var i = 0; i < cells.length; i++)
-                _positionedPad(
-                  index:     i,
-                  cell:      cells[i],
-                  placement: placements[i],
-                  cellW:     cellW,
-                  cellH:     cellH,
-                  cells:     cells,
-                  placements: placements,
-                ),
+                _placed(
+                  i, cells[i], placements[i], cellW, cellH, cells),
             ],
           ),
         );
@@ -373,62 +377,48 @@ class _PadGrid extends StatelessWidget {
     );
   }
 
-  Widget _positionedPad({
-    required int index,
-    required PadCell cell,
-    required _Placement placement,
-    required double cellW,
-    required double cellH,
-    required List<PadCell> cells,
-    required List<_Placement> placements,
-  }) {
+  Widget _placed(int idx, PadCell cell, _Placement p,
+                 double cellW, double cellH, List<PadCell> cells) {
     final cs = cell.colSpan.clamp(1, kPadColumns);
     final rs = cell.rowSpan.clamp(1, 8);
-    final left   = placement.col * (cellW + kPadGap);
-    final top    = placement.row * (cellH + kPadGap);
-    final width  = cs * cellW + (cs - 1) * kPadGap;
-    final height = rs * cellH + (rs - 1) * kPadGap;
-
     return Positioned(
-      left: left, top: top,
-      width: width, height: height,
+      left:   p.col * (cellW + kPadGap),
+      top:    p.row * (cellH + kPadGap),
+      width:  cs * cellW + (cs - 1) * kPadGap,
+      height: rs * cellH + (rs - 1) * kPadGap,
       child: _PadTile(
-        cell:      cell,
-        cellIndex: index,
-        allCells:  cells,
-        placements: placements,
-        onDown:    () => onDown(cell.trackId),
-        onUp:      () => onUp(cell.trackId),
-        onEdit:    () => onEdit(index, cell),
-        onDrop:    (fromTrackId) {
-          // Find cell index by trackId
-          final fromIdx = cells.indexWhere((c) => c.trackId == fromTrackId);
-          if (fromIdx >= 0) onSwap(fromIdx, index);
-        },
+        cell:     cell,
+        editMode: editMode,
+        onDown:   () => onDown(cell.trackId),
+        onUp:     () => onUp(cell.trackId),
+        onEdit:   () => onEdit(idx, cell),
+        onDrop:   (fromTid) => onSwap(fromTid, idx),
       ),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Individual draggable pad tile
+// Individual pad tile
+//
+// PLAY MODE  — uses raw Listener (bypasses gesture arena).
+//              noteOn fires on first pointer contact; noteOff on release/cancel.
+//
+// EDIT MODE  — tap opens the cell editor.
+//              long-press + drag reorders pads (LongPressDraggable).
 // ---------------------------------------------------------------------------
 
 class _PadTile extends StatefulWidget {
-  final PadCell cell;
-  final int cellIndex;
-  final List<PadCell> allCells;
-  final List<_Placement> placements;
+  final PadCell     cell;
+  final bool        editMode;
   final VoidCallback onDown;
   final VoidCallback onUp;
   final VoidCallback onEdit;
-  final ValueChanged<int> onDrop; // called with the dragged trackId
+  final ValueChanged<int> onDrop;  // called with dragged trackId
 
   const _PadTile({
     required this.cell,
-    required this.cellIndex,
-    required this.allCells,
-    required this.placements,
+    required this.editMode,
     required this.onDown,
     required this.onUp,
     required this.onEdit,
@@ -444,95 +434,119 @@ class _PadTileState extends State<_PadTile> {
 
   Color get _color => Color(widget.cell.colorValue);
 
-  @override
-  Widget build(BuildContext context) {
-    final tile = GestureDetector(
-      onTapDown: (_) {
-        setState(() => _pressed = true);
-        widget.onDown();
-      },
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onUp();
-      },
-      onTapCancel: () {
-        setState(() => _pressed = false);
-        widget.onUp();
-      },
-      onLongPress: widget.onEdit,
-      child: DragTarget<int>(
-        onWillAcceptWithDetails: (d) => d.data != widget.cell.trackId,
-        onAcceptWithDetails: (d) => widget.onDrop(d.data),
-        builder: (ctx, candidates, _) {
-          final isTarget = candidates.isNotEmpty;
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 60),
-            decoration: BoxDecoration(
-              color: _pressed
-                  ? _color.withAlpha(130)
-                  : isTarget
-                      ? _color.withAlpha(70)
-                      : _color.withAlpha(30),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _pressed || isTarget ? _color : _color.withAlpha(110),
-                width: 2,
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.music_note, color: _color, size: 26),
-                const SizedBox(height: 4),
-                Text(
-                  widget.cell.label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: _color,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+  Widget _visual({bool isTarget = false, bool showEditIcon = false}) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 60),
+      decoration: BoxDecoration(
+        color: _pressed
+            ? _color.withAlpha(130)
+            : isTarget
+                ? _color.withAlpha(70)
+                : _color.withAlpha(30),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _pressed || isTarget ? _color : _color.withAlpha(110),
+          width: 2,
+        ),
       ),
-    );
-
-    return LongPressDraggable<int>(
-      data: widget.cell.trackId,
-      delay: const Duration(milliseconds: 400),
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(
-          opacity: 0.85,
-          child: Container(
-            width:  110,
-            height: 70,
-            decoration: BoxDecoration(
-              color: _color.withAlpha(90),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _color, width: 2),
-            ),
-            child: Center(
-              child: Text(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.music_note, color: _color, size: 26),
+              const SizedBox(height: 4),
+              Text(
                 widget.cell.label,
                 style: TextStyle(
-                  color: _color, fontWeight: FontWeight.bold, fontSize: 14),
+                  fontSize: 13, fontWeight: FontWeight.bold,
+                  color: _color, letterSpacing: 1,
+                ),
               ),
+            ],
+          ),
+          if (showEditIcon)
+            Positioned(
+              right: 6, top: 6,
+              child: Icon(Icons.edit_outlined,
+                size: 13, color: _color.withAlpha(180)),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dragFeedback() => Material(
+    color: Colors.transparent,
+    child: Container(
+      width: 110, height: 72,
+      decoration: BoxDecoration(
+        color: _color.withAlpha(90),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _color, width: 2),
+      ),
+      child: Center(
+        child: Text(widget.cell.label,
+          style: TextStyle(
+            color: _color, fontWeight: FontWeight.bold, fontSize: 14)),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    // ── PLAY MODE ────────────────────────────────────────────────────────────
+    // Listener fires immediately on pointer contact and never competes in the
+    // gesture arena, so noteOn/noteOff are always reliable regardless of how
+    // fast or many fingers tap.
+    if (!widget.editMode) {
+      return Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) {
+          setState(() => _pressed = true);
+          widget.onDown();
+        },
+        onPointerUp: (_) {
+          setState(() => _pressed = false);
+          widget.onUp();
+        },
+        onPointerCancel: (_) {
+          setState(() => _pressed = false);
+          widget.onUp();
+        },
+        child: _visual(),
+      );
+    }
+
+    // ── EDIT MODE ────────────────────────────────────────────────────────────
+    // GestureDetector.onTap opens the editor.
+    // LongPressDraggable lets you drag to reorder.
+    return LongPressDraggable<int>(
+      data: widget.cell.trackId,
+      delay: const Duration(milliseconds: 350),
+      feedback: _dragFeedback(),
+      childWhenDragging: Opacity(
+        opacity: 0.15,
+        child: _visual(showEditIcon: true),
+      ),
+      child: DragTarget<int>(
+        onWillAcceptWithDetails: (d) => d.data != widget.cell.trackId,
+        onAcceptWithDetails:     (d) => widget.onDrop(d.data),
+        builder: (ctx, candidates, _) => GestureDetector(
+          onTap: widget.onEdit,
+          child: _visual(
+            isTarget:     candidates.isNotEmpty,
+            showEditIcon: true,
           ),
         ),
       ),
-      childWhenDragging: Opacity(opacity: 0.2, child: tile),
-      child: tile,
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Cell editor dialog — edit label, color, colSpan, rowSpan
+// Cell editor dialog
 // ---------------------------------------------------------------------------
 
 class _CellEditor extends StatefulWidget {
@@ -565,10 +579,7 @@ class _CellEditorState extends State<_CellEditor> {
   }
 
   @override
-  void dispose() {
-    _labelCtrl.dispose();
-    super.dispose();
-  }
+  void dispose() { _labelCtrl.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -591,13 +602,13 @@ class _CellEditorState extends State<_CellEditor> {
             ),
             const SizedBox(height: 16),
 
-            // Color picker
+            // Color
             const Text('Color', style: TextStyle(color: Colors.white38, fontSize: 12)),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8, runSpacing: 8,
               children: _presetColors.map((c) {
-                final selected = c == _colorValue;
+                final sel = c == _colorValue;
                 return GestureDetector(
                   onTap: () => setState(() => _colorValue = c),
                   child: AnimatedContainer(
@@ -606,9 +617,7 @@ class _CellEditorState extends State<_CellEditor> {
                     decoration: BoxDecoration(
                       color: Color(c),
                       shape: BoxShape.circle,
-                      border: selected
-                          ? Border.all(color: Colors.white, width: 2)
-                          : null,
+                      border: sel ? Border.all(color: Colors.white, width: 2) : null,
                     ),
                   ),
                 );
@@ -616,16 +625,13 @@ class _CellEditorState extends State<_CellEditor> {
             ),
             const SizedBox(height: 16),
 
-            // Size picker
+            // Size
             const Text('Size', style: TextStyle(color: Colors.white38, fontSize: 12)),
             const SizedBox(height: 8),
             _SizePicker(
               colSpan: _colSpan,
               rowSpan: _rowSpan,
-              onChanged: (cs, rs) => setState(() {
-                _colSpan = cs;
-                _rowSpan = rs;
-              }),
+              onChanged: (cs, rs) => setState(() { _colSpan = cs; _rowSpan = rs; }),
             ),
           ],
         ),
@@ -636,17 +642,14 @@ class _CellEditorState extends State<_CellEditor> {
           child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
         ),
         TextButton(
-          onPressed: () => Navigator.pop(
-            context,
-            widget.cell.copyWith(
-              label:      _labelCtrl.text.trim().isEmpty
-                              ? widget.cell.label
-                              : _labelCtrl.text.trim(),
-              colorValue: _colorValue,
-              colSpan:    _colSpan,
-              rowSpan:    _rowSpan,
-            ),
-          ),
+          onPressed: () => Navigator.pop(context, widget.cell.copyWith(
+            label:      _labelCtrl.text.trim().isEmpty
+                            ? widget.cell.label
+                            : _labelCtrl.text.trim(),
+            colorValue: _colorValue,
+            colSpan:    _colSpan,
+            rowSpan:    _rowSpan,
+          )),
           child: const Text('Save', style: TextStyle(color: Colors.greenAccent)),
         ),
       ],
@@ -654,21 +657,15 @@ class _CellEditorState extends State<_CellEditor> {
   }
 }
 
-// Grid showing all supported size combinations (1×1, 1×2, 2×1, 2×2).
 class _SizePicker extends StatelessWidget {
-  final int colSpan;
-  final int rowSpan;
+  final int colSpan, rowSpan;
   final void Function(int cs, int rs) onChanged;
 
   const _SizePicker({
-    required this.colSpan,
-    required this.rowSpan,
-    required this.onChanged,
-  });
+    required this.colSpan, required this.rowSpan, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    // Offer sizes: 1×1, 2×1 (wide), 1×2 (tall), 2×2 (large)
     const sizes = [(1, 1), (2, 1), (1, 2), (2, 2)];
     return Wrap(
       spacing: 8, runSpacing: 8,
@@ -690,14 +687,11 @@ class _SizePicker extends StatelessWidget {
               ),
             ),
             child: Center(
-              child: Text(
-                '$cs×$rs',
+              child: Text('$cs×$rs',
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 10, fontWeight: FontWeight.bold,
                   color: sel ? Colors.greenAccent : Colors.white38,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+                )),
             ),
           ),
         );
