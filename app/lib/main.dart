@@ -6,6 +6,7 @@ import 'providers/project_provider.dart';
 import 'services/export_service.dart';
 import 'ui/ai/ai_page.dart';
 import 'ui/effects/effects_page.dart';
+import 'ui/pads/pad_page.dart';
 import 'ui/sampler/sampler_page.dart';
 import 'ui/sequencer/sequencer_page.dart';
 import 'ui/settings/settings_page.dart';
@@ -54,6 +55,7 @@ class _RootPageState extends ConsumerState<_RootPage> {
     SynthPage(),
     SamplerPage(),
     EffectsPage(),
+    PadPage(),
     AiPage(),
   ];
 
@@ -62,6 +64,7 @@ class _RootPageState extends ConsumerState<_RootPage> {
     BottomNavigationBarItem(icon: Icon(Icons.piano),         label: 'SYNTH'),
     BottomNavigationBarItem(icon: Icon(Icons.album),         label: 'SAMPLER'),
     BottomNavigationBarItem(icon: Icon(Icons.tune),          label: 'FX'),
+    BottomNavigationBarItem(icon: Icon(Icons.apps),          label: 'PADS'),
     BottomNavigationBarItem(icon: Icon(Icons.auto_awesome),  label: 'AI'),
   ];
 

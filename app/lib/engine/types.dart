@@ -30,6 +30,14 @@ enum EffectParam {
   filterResonance, // 9 — per-track: 0..1 normalised
 }
 
+/// Sample parameter IDs — must match Rust `SampleParam` enum (repr u8).
+enum SampleParam {
+  trimStart,    // 0 — normalised 0..1 start position in sample
+  trimEnd,      // 1 — normalised 0..1 end position (1.0 = full length)
+  basePitch,    // 2 — MIDI root note 0..127 (as double)
+  playbackRate, // 3 — speed multiplier 0.25..4.0
+}
+
 /// Single step in the sequencer pattern.
 class StepData {
   final bool active;

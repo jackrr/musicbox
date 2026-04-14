@@ -92,6 +92,37 @@ class ProjectNotifier extends AsyncNotifier<Project> {
     return p.copyWith(tracks: tracks);
   });
 
+  void updateSampleParam(int trackId, SampleParam param, double value) =>
+      _update((p) {
+    final tracks = List<TrackConfig>.from(p.tracks);
+    final sp = tracks[trackId].sampleParams;
+    tracks[trackId] = tracks[trackId].copyWith(
+      sampleParams: switch (param) {
+        SampleParam.trimStart    => sp.copyWith(trimStart: value),
+        SampleParam.trimEnd      => sp.copyWith(trimEnd: value),
+        SampleParam.basePitch    => sp.copyWith(basePitch: value.round()),
+        SampleParam.playbackRate => sp.copyWith(playbackRate: value),
+      },
+    );
+    return p.copyWith(tracks: tracks);
+  });
+
+  void updatePadCell(int layoutIdx, int cellIdx, PadCell cell) => _update((p) {
+    final layouts = List<PadLayout>.from(p.padLayouts);
+    final cells   = List<PadCell>.from(layouts[layoutIdx].cells);
+    cells[cellIdx] = cell;
+    layouts[layoutIdx] = layouts[layoutIdx].copyWith(cells: cells);
+    return p.copyWith(padLayouts: layouts);
+  });
+
+  void addPadLayout(PadLayout layout) => _update((p) {
+    return p.copyWith(padLayouts: [...p.padLayouts, layout]);
+  });
+
+  void setActivePadLayout(int idx) => _update((p) {
+    return p.copyWith(activePadLayout: idx);
+  });
+
   Future<void> saveNow() async {
     _saveTimer?.cancel();
     final p = state.value;

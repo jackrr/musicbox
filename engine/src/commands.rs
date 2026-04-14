@@ -9,6 +9,7 @@
 /// kind  5  SetStep         track_id  param_a=step_idx  param_b=pitch     value=vel(0=clear)
 /// kind  6  SetEffect       track_id  param_a=EffectParam —               value=f32
 /// kind  7  SetNumSteps     —         param_a=steps(8/16/32/64)           value=—
+/// kind  8  SetSampleParam  track_id  param_a=SampleParam —               value=f32
 /// ```
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -22,14 +23,24 @@ pub struct FfiCommand {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Command {
-    NoteOn        { track_id: u8, pitch: u8, velocity: f32 },
-    NoteOff       { track_id: u8, pitch: u8 },
-    SetVoiceParam { track_id: u8, param: VoiceParam, value: f32 },
-    SetBPM        (f32),
-    SetTransport  (TransportState),
-    SetStep       { track_id: u8, step_idx: u8, pitch: u8, velocity: f32 },
-    SetEffect     { track_id: u8, param: EffectParam, value: f32 },
-    SetNumSteps   (usize),
+    NoteOn          { track_id: u8, pitch: u8, velocity: f32 },
+    NoteOff         { track_id: u8, pitch: u8 },
+    SetVoiceParam   { track_id: u8, param: VoiceParam, value: f32 },
+    SetBPM          (f32),
+    SetTransport    (TransportState),
+    SetStep         { track_id: u8, step_idx: u8, pitch: u8, velocity: f32 },
+    SetEffect       { track_id: u8, param: EffectParam, value: f32 },
+    SetNumSteps     (usize),
+    SetSampleParam  { track_id: u8, param: SampleParam, value: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SampleParam {
+    TrimStart    = 0, // 0..1 normalised position in sample
+    TrimEnd      = 1, // 0..1 normalised position in sample (1.0 = full length)
+    BasePitch    = 2, // MIDI note 0..127 (as f32); pitch is relative to this
+    PlaybackRate = 3, // 0.25..4.0 speed multiplier
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +92,10 @@ impl FfiCommand {
                 Some(Command::SetEffect { track_id: self.track_id, param, value: self.value })
             }
             7 => Some(Command::SetNumSteps(self.param_a as usize)),
+            8 => {
+                let param = sample_param(self.param_a)?;
+                Some(Command::SetSampleParam { track_id: self.track_id, param, value: self.value })
+            }
             _ => None,
         }
     }
@@ -90,6 +105,14 @@ fn voice_param(v: u8) -> Option<VoiceParam> {
     Some(match v {
         0 => VoiceParam::OscType, 1 => VoiceParam::Attack, 2 => VoiceParam::Decay,
         3 => VoiceParam::Sustain, 4 => VoiceParam::Release, 5 => VoiceParam::Volume,
+        _ => return None,
+    })
+}
+
+fn sample_param(v: u8) -> Option<SampleParam> {
+    Some(match v {
+        0 => SampleParam::TrimStart, 1 => SampleParam::TrimEnd,
+        2 => SampleParam::BasePitch, 3 => SampleParam::PlaybackRate,
         _ => return None,
     })
 }

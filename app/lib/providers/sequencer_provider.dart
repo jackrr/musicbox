@@ -89,6 +89,12 @@ class SequencerNotifier extends StateNotifier<SequencerState> {
       engine.setEffect(ti, EffectParam.filterType,     fx.filterMode.toDouble());
       engine.setEffect(ti, EffectParam.filterCutoff,   fx.filterCutoff);
       engine.setEffect(ti, EffectParam.filterResonance, fx.filterResonance);
+      // Sample params
+      final sp = track.sampleParams;
+      engine.setSampleParam(ti, SampleParam.trimStart,    sp.trimStart);
+      engine.setSampleParam(ti, SampleParam.trimEnd,      sp.trimEnd);
+      engine.setSampleParam(ti, SampleParam.basePitch,    sp.basePitch.toDouble());
+      engine.setSampleParam(ti, SampleParam.playbackRate, sp.playbackRate);
     }
     state = state.copyWith(bpm: p.bpm, numSteps: p.numSteps);
   }

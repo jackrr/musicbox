@@ -2,6 +2,7 @@ mod audio;
 mod commands;
 mod effects;
 mod export;
+mod recorder;
 mod sampler;
 mod sequencer;
 mod synth;
@@ -36,6 +37,7 @@ use std::sync::{
 use audio::AudioStream;
 use commands::FfiCommand;
 use export::{ExportState, render_wav};
+use recorder::Recorder;
 use sampler::{load_wav, SampleMsg};
 use sequencer::{Step, MAX_STEPS, NUM_TRACKS};
 use synth::voice::TrackParams;
@@ -60,6 +62,9 @@ pub struct Engine {
 
     // Export progress 0..=100 (101 = failed)
     export_progress: Arc<AtomicU32>,
+
+    // Microphone recorder (None when not recording)
+    recorder: Option<Recorder>,
 }
 
 impl Engine {
@@ -80,6 +85,7 @@ impl Engine {
             patterns: Box::new([[Step::default(); MAX_STEPS]; NUM_TRACKS]),
             track_params: Box::new(std::array::from_fn(|_| TrackParams::default())),
             export_progress: Arc::new(AtomicU32::new(0)),
+            recorder: None,
         })
     }
 
@@ -216,6 +222,44 @@ pub unsafe extern "C" fn musicbox_engine_export_wav(
 pub unsafe extern "C" fn musicbox_engine_export_progress(ptr: *const Engine) -> u32 {
     if ptr.is_null() { return 0; }
     (*ptr).export_progress.load(Ordering::Relaxed)
+}
+
+/// Start microphone recording. Returns true if the input stream opened successfully.
+/// Any previously-active recording is discarded.
+///
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_start_recording(ptr: *mut Engine) -> bool {
+    if ptr.is_null() { return false; }
+    let e = &mut *ptr;
+    // Drop any existing recorder before starting a new one.
+    e.recorder = None;
+    e.recorder = Recorder::start();
+    e.recorder.is_some()
+}
+
+/// Stop recording and write the captured audio to a WAV file at `path`.
+/// Returns true on success. The recorder is consumed regardless.
+///
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_stop_recording(
+    ptr: *mut Engine, path_ptr: *const u8, path_len: usize,
+) -> bool {
+    if ptr.is_null() || path_ptr.is_null() { return false; }
+    let e = &mut *ptr;
+    let recorder = match e.recorder.take() {
+        Some(r) => r,
+        None => return false,
+    };
+    let path = match std::str::from_utf8(std::slice::from_raw_parts(path_ptr, path_len)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    match recorder.stop_and_save(path) {
+        Ok(()) => true,
+        Err(err) => { eprintln!("[musicbox] stop_recording: {err}"); false }
+    }
 }
 
 /// No-op stubs (transport handled via send_command kind=4).

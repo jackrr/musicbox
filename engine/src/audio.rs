@@ -102,6 +102,9 @@ impl AudioState {
                 }
             }
             SetNumSteps(n) => self.sequencer.set_num_steps(n),
+            SetSampleParam { track_id, param, value } => {
+                self.sampler.set_sample_param(track_id, param, value);
+            }
         }
     }
 

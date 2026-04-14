@@ -72,6 +72,9 @@ class AudioEngine {
   void setNumSteps(int n) =>
       _send(7, 0, n, 0, 0.0);
 
+  void setSampleParam(int trackId, SampleParam param, double value) =>
+      _send(8, trackId, param.index, 0, value);
+
   // --- Playhead ----------------------------------------------------------------
 
   /// Current sequencer step (0..numSteps-1), or -1 when stopped.
@@ -90,6 +93,29 @@ class AudioEngine {
     try {
       ptr.asTypedList(bytes.length).setAll(0, bytes);
       return _bindings.loadSample(_ptr, trackId, ptr, bytes.length);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
+
+  // --- Recording ---------------------------------------------------------------
+
+  /// Start microphone input recording. Returns false if the input device could
+  /// not be opened (e.g., permission denied or no microphone available).
+  bool startRecording() {
+    _requireInitialized();
+    return _bindings.startRecording(_ptr);
+  }
+
+  /// Stop recording and write the captured audio to a WAV file at [path].
+  /// Returns true on success.
+  bool stopRecording(String path) {
+    _requireInitialized();
+    final bytes = utf8.encode(path);
+    final ptr = malloc.allocate<Uint8>(bytes.length);
+    try {
+      ptr.asTypedList(bytes.length).setAll(0, bytes);
+      return _bindings.stopRecording(_ptr, ptr, bytes.length);
     } finally {
       malloc.free(ptr);
     }
