@@ -72,8 +72,11 @@ impl Sampler {
         }
     }
 
-    /// For samplers, note-off doesn't stop one-shot playback.
-    pub fn note_off(&mut self, _track_id: u8) {}
+    pub fn note_off(&mut self, track_id: u8) {
+        if let Some(t) = self.tracks.get_mut(track_id as usize) {
+            t.playing = false;
+        }
+    }
 
     /// Accumulate one track's sampler output into `buf` (mono, pre-zeroed by caller).
     pub fn render_track(&mut self, track_id: u8, buf: &mut [f32], n: usize) {

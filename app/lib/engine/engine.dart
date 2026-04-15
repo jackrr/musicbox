@@ -92,6 +92,12 @@ class AudioEngine {
     return _bindings.hasSample(_ptr, trackId);
   }
 
+  /// Total duration of the sample loaded for [trackId] in seconds, or 0.0 if none.
+  double getSampleDuration(int trackId) {
+    _requireInitialized();
+    return _bindings.getSampleDuration(_ptr, trackId);
+  }
+
   /// Fetch downsampled waveform peaks for [trackId].
   /// Returns a [Float32List] of length [numPeaks]*2 with alternating (min, max) pairs,
   /// or null if no sample is loaded for that track.

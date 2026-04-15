@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,6 +12,44 @@ import '../../engine/types.dart';
 import '../../models/project.dart';
 import '../../providers/engine_provider.dart';
 import '../../providers/project_provider.dart';
+import '../../providers/sequencer_provider.dart';
+
+// Tracks which sample tracks are currently playing (one-shot; auto-clears on finish).
+final _samplePlayingProvider = StateProvider<Set<int>>((ref) => const {});
+
+// Per-track timers for auto-clearing the playing indicator when the sample ends naturally.
+final _playTimers = <int, Timer>{};
+
+void _playTrack(WidgetRef ref, int trackIndex, SampleParamsData sp, {bool loop = false}) {
+  final engine = ref.read(engineProvider);
+  if (!engine.hasSample(trackIndex)) return;
+
+  engine.noteOn(trackIndex, 60, 100);
+  ref.read(_samplePlayingProvider.notifier).update((s) => {...s, trackIndex});
+
+  _playTimers[trackIndex]?.cancel();
+  final totalSecs = engine.getSampleDuration(trackIndex);
+  if (totalSecs > 0) {
+    final playMs = ((totalSecs * (sp.trimEnd - sp.trimStart) / sp.playbackRate) * 1000)
+        .ceil()
+        .clamp(0, 60000);
+    _playTimers[trackIndex] = Timer(Duration(milliseconds: playMs), () {
+      if (loop) {
+        _playTrack(ref, trackIndex, sp, loop: true);
+      } else {
+        ref.read(_samplePlayingProvider.notifier).update((s) => s.difference({trackIndex}));
+        _playTimers.remove(trackIndex);
+      }
+    });
+  }
+}
+
+void _stopTrack(WidgetRef ref, int trackIndex) {
+  ref.read(engineProvider).noteOff(trackIndex, 60);
+  ref.read(_samplePlayingProvider.notifier).update((s) => s.difference({trackIndex}));
+  _playTimers[trackIndex]?.cancel();
+  _playTimers.remove(trackIndex);
+}
 
 class SamplerPage extends ConsumerWidget {
   const SamplerPage({super.key});
@@ -73,6 +112,9 @@ class _SamplePad extends ConsumerWidget {
     required this.track,
     required this.color,
   });
+
+  void _startPlayback(WidgetRef ref) => _playTrack(ref, trackIndex, track.sampleParams);
+  void _stopPlayback(WidgetRef ref)  => _stopTrack(ref, trackIndex);
 
   Future<void> _pickSample(WidgetRef ref) async {
     final result = await FilePicker.platform.pickFiles(
@@ -183,37 +225,55 @@ class _SamplePad extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasPath = track.samplePath != null;
+    final playing = ref.watch(_samplePlayingProvider).contains(trackIndex);
     final name = hasPath
         ? track.samplePath!.split('/').last
         : 'T${trackIndex + 1}  —  empty';
 
-    // Use Listener for immediate noteOn on pointer-down (no tap-disambiguation
-    // delay), while GestureDetector handles the long-press to open the editor.
-    // Guard with hasSample() so we never accidentally trigger a synth voice.
+    // Listener fires immediately on pointer-down (no gesture-arena delay).
+    // Tap toggles: if playing → stop; if not playing → start.
+    // Long-press opens the editor.
     return Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: (_) {
-        final engine = ref.read(engineProvider);
-        if (engine.hasSample(trackIndex)) engine.noteOn(trackIndex, 60, 100);
+        if (ref.read(_samplePlayingProvider).contains(trackIndex)) {
+          _stopPlayback(ref);
+        } else {
+          _startPlayback(ref);
+        }
       },
       child: GestureDetector(
         onLongPress: () => _showEditor(context, ref),
+        // Empty pad: a simple tap opens the editor (no sample to play yet).
+        onTap: hasPath ? null : () => _showEditor(context, ref),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
+          duration: const Duration(milliseconds: 80),
           decoration: BoxDecoration(
-            color: hasPath ? color.withAlpha(40) : Colors.white10,
+            color: hasPath
+                ? playing
+                    ? color.withAlpha(85)
+                    : color.withAlpha(40)
+                : Colors.white10,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: hasPath ? color : Colors.white24,
-              width: 2,
+              color: playing
+                  ? Colors.white
+                  : hasPath
+                      ? color
+                      : Colors.white24,
+              width: playing ? 2.5 : 2,
             ),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                hasPath ? Icons.music_note : Icons.add,
-                color: hasPath ? color : Colors.white38,
+                playing
+                    ? Icons.stop_circle_outlined
+                    : hasPath
+                        ? Icons.music_note
+                        : Icons.add,
+                color: playing ? Colors.white : hasPath ? color : Colors.white38,
                 size: 32,
               ),
               const SizedBox(height: 6),
@@ -223,7 +283,7 @@ class _SamplePad extends ConsumerWidget {
                   name,
                   style: TextStyle(
                     fontSize: 11,
-                    color: hasPath ? color : Colors.white38,
+                    color: playing ? Colors.white : hasPath ? color : Colors.white38,
                     fontWeight: FontWeight.bold,
                   ),
                   textAlign: TextAlign.center,
@@ -269,12 +329,15 @@ class _SampleEditorSheet extends ConsumerStatefulWidget {
 
 class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
   Float32List? _peaks;
+  double _sampleDuration = 0.0; // total seconds of the loaded sample
 
   @override
   void initState() {
     super.initState();
     if (widget.track.samplePath != null) {
-      _peaks = ref.read(engineProvider).getSamplePeaks(widget.trackIndex);
+      final engine = ref.read(engineProvider);
+      _peaks = engine.getSamplePeaks(widget.trackIndex);
+      _sampleDuration = engine.getSampleDuration(widget.trackIndex);
     }
   }
 
@@ -283,16 +346,27 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
     ref.read(projectProvider.notifier).updateSampleParam(widget.trackIndex, param, value);
   }
 
+  String _beatCountLabel(SampleParamsData sp, double bpm) {
+    if (_sampleDuration <= 0) return '';
+    final playSeconds = _sampleDuration * (sp.trimEnd - sp.trimStart) / sp.playbackRate;
+    final beats = playSeconds * bpm / 60.0;
+    // Round to nearest 1/8 beat for a clean display.
+    final rounded = (beats * 8).round() / 8.0;
+    return '${rounded % 1 == 0 ? rounded.toInt() : rounded.toStringAsFixed(2)} beats';
+  }
+
   @override
   Widget build(BuildContext context) {
     // Watch provider so sliders reflect live values after each change.
     final sp = ref.watch(projectProvider).valueOrNull
         ?.tracks[widget.trackIndex].sampleParams
         ?? widget.track.sampleParams;
+    final bpm = ref.watch(sequencerProvider).bpm;
     final color = widget.color;
     final hasPath = ref.watch(projectProvider).valueOrNull
         ?.tracks[widget.trackIndex].samplePath != null
         || widget.track.samplePath != null;
+    final playing = ref.watch(_samplePlayingProvider).contains(widget.trackIndex);
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -318,6 +392,21 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
                   ),
                 ),
               ),
+              if (hasPath) ...[
+                IconButton(
+                  icon: Icon(
+                    playing ? Icons.stop_circle_outlined : Icons.play_circle_outlined,
+                    color: playing ? Colors.white : color,
+                    size: 22,
+                  ),
+                  onPressed: () => playing
+                      ? _stopTrack(ref, widget.trackIndex)
+                      : _playTrack(ref, widget.trackIndex, sp, loop: true),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 8),
+              ],
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white38, size: 20),
                 onPressed: () => Navigator.pop(context),
@@ -378,6 +467,22 @@ class _SampleEditorSheetState extends ConsumerState<_SampleEditorSheet> {
               onTrimEndChanged:   (v) => _setSampleParam(SampleParam.trimEnd,   v),
             ),
 
+            if (_sampleDuration > 0) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  _beatCountLabel(sp, bpm),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: color.withAlpha(180),
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 16),
 
             // Root note slider
@@ -431,55 +536,139 @@ class _WaveformView extends StatefulWidget {
 
 class _WaveformViewState extends State<_WaveformView> {
   _DragTarget _dragging = _DragTarget.none;
-  // Touch threshold in logical pixels for grabbing a handle.
+
+  // Visible window in sample-space [0, 1]. Pinch zooms this range.
+  double _viewStart = 0.0;
+  double _viewEnd   = 1.0;
+
+  // Tracks cumulative scale and focal point across a scale gesture.
+  double _lastScale  = 1.0;
+  double _lastFocalX = 0.0;
+
   static const _kHandleHitSlop = 28.0;
 
-  void _onPanStart(DragStartDetails d, double width) {
-    final x = d.localPosition.dx;
-    final startX = widget.trimStart * width;
-    final endX   = widget.trimEnd   * width;
-    final dStart = (x - startX).abs();
-    final dEnd   = (x - endX).abs();
+  // --- coordinate helpers ---
 
-    if (dStart < _kHandleHitSlop && dStart <= dEnd) {
-      setState(() => _dragging = _DragTarget.start);
-    } else if (dEnd < _kHandleHitSlop) {
-      setState(() => _dragging = _DragTarget.end);
-    } else {
-      _dragging = _DragTarget.none;
+  double _toCanvasX(double samplePos, double width) =>
+      (samplePos - _viewStart) / (_viewEnd - _viewStart) * width;
+
+  double _toSamplePos(double canvasX, double width) =>
+      _viewStart + (canvasX / width) * (_viewEnd - _viewStart);
+
+  void _resetZoom() => setState(() { _viewStart = 0.0; _viewEnd = 1.0; });
+
+  void _applyZoom(double factor, double focalSampleNorm) {
+    final viewWidth = _viewEnd - _viewStart;
+    final focalSample = _viewStart + focalSampleNorm * viewWidth;
+    final newWidth = (viewWidth / factor).clamp(0.02, 1.0);
+    setState(() {
+      _viewStart = (focalSample - focalSampleNorm * newWidth).clamp(0.0, 1.0 - newWidth);
+      _viewEnd   = _viewStart + newWidth;
+    });
+  }
+
+  // --- gesture handlers ---
+
+  void _onScaleStart(ScaleStartDetails d, double width) {
+    _lastScale  = 1.0;
+    _lastFocalX = d.localFocalPoint.dx;
+
+    // Single-finger start: check if we're grabbing a trim handle.
+    if (d.pointerCount == 1) {
+      final x      = d.localFocalPoint.dx;
+      final startX = _toCanvasX(widget.trimStart, width);
+      final endX   = _toCanvasX(widget.trimEnd,   width);
+      final dStart = (x - startX).abs();
+      final dEnd   = (x - endX).abs();
+      if (dStart < _kHandleHitSlop && dStart <= dEnd) {
+        setState(() => _dragging = _DragTarget.start);
+      } else if (dEnd < _kHandleHitSlop) {
+        setState(() => _dragging = _DragTarget.end);
+      }
     }
   }
 
-  void _onPanUpdate(DragUpdateDetails d, double width) {
-    if (_dragging == _DragTarget.none) return;
-    final norm = (d.localPosition.dx / width).clamp(0.0, 1.0);
-    if (_dragging == _DragTarget.start) {
-      widget.onTrimStartChanged(norm.clamp(0.0, (widget.trimEnd - 0.02).clamp(0.0, 0.99)));
+  void _onScaleUpdate(ScaleUpdateDetails d, double width) {
+    if (d.pointerCount >= 2) {
+      // Pinch to zoom — cancel any handle drag.
+      if (_dragging != _DragTarget.none) setState(() => _dragging = _DragTarget.none);
+      final scaleChange = d.scale / _lastScale;
+      _lastScale = d.scale;
+      _applyZoom(scaleChange, d.localFocalPoint.dx / width);
+    } else if (_dragging != _DragTarget.none) {
+      // Drag trim handle in sample-space.
+      final samplePos = _toSamplePos(d.localFocalPoint.dx, width);
+      if (_dragging == _DragTarget.start) {
+        widget.onTrimStartChanged(
+            samplePos.clamp(0.0, (widget.trimEnd - 0.02).clamp(0.0, 0.99)));
+      } else {
+        widget.onTrimEndChanged(
+            samplePos.clamp((widget.trimStart + 0.02).clamp(0.01, 1.0), 1.0));
+      }
     } else {
-      widget.onTrimEndChanged(norm.clamp((widget.trimStart + 0.02).clamp(0.01, 1.0), 1.0));
+      // Single-finger pan (only meaningful when zoomed in).
+      final viewWidth = _viewEnd - _viewStart;
+      if (viewWidth < 0.999) {
+        final dx        = d.localFocalPoint.dx - _lastFocalX;
+        final panAmount = -dx / width * viewWidth;
+        setState(() {
+          _viewStart = (_viewStart + panAmount).clamp(0.0, 1.0 - viewWidth);
+          _viewEnd   = _viewStart + viewWidth;
+        });
+      }
     }
+    _lastFocalX = d.localFocalPoint.dx;
   }
 
-  void _onPanEnd(DragEndDetails _) => setState(() => _dragging = _DragTarget.none);
+  void _onScaleEnd(ScaleEndDetails _) {
+    if (_dragging != _DragTarget.none) setState(() => _dragging = _DragTarget.none);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final zoomed = (_viewEnd - _viewStart) < 0.999;
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onPanStart:  (d) => _onPanStart(d, width),
-        onPanUpdate: (d) => _onPanUpdate(d, width),
-        onPanEnd:    _onPanEnd,
-        child: CustomPaint(
-          size: Size(width, 100),
-          painter: _WaveformPainter(
-            peaks:     widget.peaks,
-            trimStart: widget.trimStart,
-            trimEnd:   widget.trimEnd,
-            color:     widget.color,
-            dragging:  _dragging,
-          ),
+        onScaleStart:  (d) => _onScaleStart(d, width),
+        onScaleUpdate: (d) => _onScaleUpdate(d, width),
+        onScaleEnd:    _onScaleEnd,
+        onDoubleTap:   _resetZoom,
+        child: Stack(
+          children: [
+            CustomPaint(
+              size: Size(width, 100),
+              painter: _WaveformPainter(
+                peaks:     widget.peaks,
+                trimStart: widget.trimStart,
+                trimEnd:   widget.trimEnd,
+                color:     widget.color,
+                dragging:  _dragging,
+                viewStart: _viewStart,
+                viewEnd:   _viewEnd,
+              ),
+            ),
+            // Zoom badge — tap or double-tap waveform to reset.
+            if (zoomed)
+              Positioned(
+                top: 4, right: 4,
+                child: GestureDetector(
+                  onTap: _resetZoom,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${(1.0 / (_viewEnd - _viewStart)).toStringAsFixed(1)}×',
+                      style: const TextStyle(fontSize: 9, color: Colors.white70),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       );
     });
@@ -494,6 +683,8 @@ class _WaveformPainter extends CustomPainter {
   final double trimEnd;
   final Color color;
   final _DragTarget dragging;
+  final double viewStart;
+  final double viewEnd;
 
   _WaveformPainter({
     required this.peaks,
@@ -501,13 +692,19 @@ class _WaveformPainter extends CustomPainter {
     required this.trimEnd,
     required this.color,
     required this.dragging,
+    required this.viewStart,
+    required this.viewEnd,
   });
+
+  double _sx(double samplePos, double w) =>
+      (samplePos - viewStart) / (viewEnd - viewStart) * w;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
+    final w    = size.width;
+    final h    = size.height;
     final half = h / 2;
+    final viewWidth = viewEnd - viewStart;
 
     // Background
     canvas.drawRect(
@@ -515,53 +712,62 @@ class _WaveformPainter extends CustomPainter {
       Paint()..color = Colors.white.withAlpha(8),
     );
 
-    // Waveform bars
+    // Waveform bars — only those within the visible window.
     final numPeaks = (peaks?.length ?? 0) ~/ 2;
     if (numPeaks > 0) {
-      final barW = w / numPeaks;
-      final activePaint   = Paint()..color = color.withAlpha(200)..strokeWidth = barW.clamp(1.0, 3.0);
-      final inactivePaint = Paint()..color = color.withAlpha(50) ..strokeWidth = barW.clamp(1.0, 3.0);
+      // Bar stroke width grows as we zoom in so bars fill the available space.
+      final visiblePeaks = numPeaks * viewWidth;
+      final barW = (w / visiblePeaks).clamp(1.0, 6.0);
+      final activePaint   = Paint()..color = color.withAlpha(200)..strokeWidth = barW;
+      final inactivePaint = Paint()..color = color.withAlpha(50) ..strokeWidth = barW;
 
       for (var i = 0; i < numPeaks; i++) {
-        final mn   = peaks![i * 2];
-        final mx   = peaks![i * 2 + 1];
-        final x    = (i + 0.5) * barW;
-        final norm = x / w;
-        final p    = (norm >= trimStart && norm <= trimEnd) ? activePaint : inactivePaint;
-        // Map -1..1 amplitude to pixel coords (positive = up from centre)
+        final peakPos = (i + 0.5) / numPeaks; // normalised sample position
+        if (peakPos < viewStart || peakPos > viewEnd) continue;
+
+        final x  = _sx(peakPos, w);
+        final mn = peaks![i * 2];
+        final mx = peaks![i * 2 + 1];
+        final p  = (peakPos >= trimStart && peakPos <= trimEnd) ? activePaint : inactivePaint;
         final yTop = (half - mx.clamp(-1.0, 1.0) * half).clamp(0.0, h);
         final yBot = (half - mn.clamp(-1.0, 1.0) * half).clamp(0.0, h);
         canvas.drawLine(Offset(x, yTop), Offset(x, yBot.clamp(yTop, h)), p);
       }
     } else {
-      // No sample — placeholder line
       canvas.drawLine(
         Offset(0, half), Offset(w, half),
         Paint()..color = Colors.white12..strokeWidth = 1,
       );
     }
 
-    // Inactive region overlay
+    // Inactive region overlay (handles can be off-screen when zoomed).
+    final sx = _sx(trimStart, w);
+    final ex = _sx(trimEnd,   w);
     final overlayPaint = Paint()..color = Colors.black.withAlpha(110);
-    final sx = trimStart * w;
-    final ex = trimEnd * w;
-    if (sx > 0) canvas.drawRect(Rect.fromLTWH(0, 0, sx, h), overlayPaint);
-    if (ex < w) canvas.drawRect(Rect.fromLTWH(ex, 0, w - ex, h), overlayPaint);
+    if (sx > 0) {
+      canvas.drawRect(Rect.fromLTWH(0, 0, sx.clamp(0, w), h), overlayPaint);
+    }
+    if (ex < w) {
+      canvas.drawRect(Rect.fromLTWH(ex.clamp(0, w), 0, (w - ex).clamp(0, w), h), overlayPaint);
+    }
 
-    // Trim handles
-    _drawHandle(canvas, size, sx, isStart: true,  active: dragging == _DragTarget.start);
-    _drawHandle(canvas, size, ex, isStart: false, active: dragging == _DragTarget.end);
+    // Trim handles (skip if fully off-screen).
+    if (sx > -20 && sx < w + 20) {
+      _drawHandle(canvas, size, sx, isStart: true,  active: dragging == _DragTarget.start);
+    }
+    if (ex > -20 && ex < w + 20) {
+      _drawHandle(canvas, size, ex, isStart: false, active: dragging == _DragTarget.end);
+    }
   }
 
-  void _drawHandle(Canvas canvas, Size size, double x, {required bool isStart, required bool active}) {
-    final lineColor  = active ? Colors.white : color;
-    final fillColor  = active ? Colors.white : color;
-    final linePaint  = Paint()..color = lineColor..strokeWidth = 2;
-    final fillPaint  = Paint()..color = fillColor..style = PaintingStyle.fill;
+  void _drawHandle(Canvas canvas, Size size, double x,
+      {required bool isStart, required bool active}) {
+    final lineColor = active ? Colors.white : color;
+    final linePaint = Paint()..color = lineColor..strokeWidth = 2;
+    final fillPaint = Paint()..color = lineColor..style = PaintingStyle.fill;
 
     canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
 
-    // Small tab at the top
     const tabW = 10.0;
     const tabH = 14.0;
     final left  = isStart ? x : x - tabW;
@@ -578,11 +784,13 @@ class _WaveformPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_WaveformPainter old) =>
-      old.peaks    != peaks    ||
+      old.peaks     != peaks     ||
       old.trimStart != trimStart ||
       old.trimEnd   != trimEnd   ||
       old.color     != color     ||
-      old.dragging  != dragging;
+      old.dragging  != dragging  ||
+      old.viewStart != viewStart ||
+      old.viewEnd   != viewEnd;
 }
 
 // ---------------------------------------------------------------------------

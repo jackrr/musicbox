@@ -69,6 +69,8 @@ pub struct Engine {
     // Cached decoded sample data for waveform peak extraction (Flutter-side only).
     // Shared with the audio thread via Arc; never mutated after load.
     sample_data: Vec<Option<Arc<Vec<f32>>>>,
+    // Source sample rates, stored alongside sample_data for duration calculation.
+    sample_source_rates: Vec<Option<f32>>,
 }
 
 impl Engine {
@@ -91,6 +93,7 @@ impl Engine {
             export_progress: Arc::new(AtomicU32::new(0)),
             recorder: None,
             sample_data: vec![None; NUM_TRACKS],
+            sample_source_rates: vec![None; NUM_TRACKS],
         })
     }
 
@@ -187,8 +190,10 @@ pub unsafe extern "C" fn musicbox_engine_load_sample(
     match load_wav(path) {
         Ok((data, rate)) => {
             let arc = std::sync::Arc::new(data);
-            if (track_id as usize) < e.sample_data.len() {
-                e.sample_data[track_id as usize] = Some(Arc::clone(&arc));
+            let idx = track_id as usize;
+            if idx < e.sample_data.len() {
+                e.sample_data[idx] = Some(Arc::clone(&arc));
+                e.sample_source_rates[idx] = Some(rate as f32);
             }
             let _ = e.sample_tx.send(SampleMsg {
                 track_id, data: arc, source_rate: rate as f32,
@@ -322,6 +327,26 @@ pub unsafe extern "C" fn musicbox_engine_get_sample_peaks(
     }
 
     num_peaks as u32
+}
+
+/// Total duration of the loaded sample for [track_id] in seconds, or 0.0 if none is loaded.
+/// Dart uses this to compute beat-length of the current trim region.
+///
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_get_sample_duration(
+    ptr: *const Engine, track_id: u8,
+) -> f32 {
+    if ptr.is_null() { return 0.0; }
+    let e = &*ptr;
+    let idx = track_id as usize;
+    match (
+        e.sample_data.get(idx).and_then(|d| d.as_ref()),
+        e.sample_source_rates.get(idx).and_then(|r| *r),
+    ) {
+        (Some(data), Some(rate)) if rate > 0.0 => data.len() as f32 / rate,
+        _ => 0.0,
+    }
 }
 
 /// No-op stubs (transport handled via send_command kind=4).
