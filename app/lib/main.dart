@@ -1,6 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'bug_report/bug_report_config.dart';
+import 'bug_report/crash_capture.dart';
+import 'bug_report/log_buffer.dart';
+import 'bug_report/musicbox_digest.dart';
+import 'bug_report/ui/bug_report_sheet.dart';
 import 'providers/engine_provider.dart';
 import 'providers/project_provider.dart';
 import 'services/export_service.dart';
@@ -12,8 +22,70 @@ import 'ui/sequencer/sequencer_page.dart';
 import 'ui/settings/settings_page.dart';
 import 'ui/synth/synth_page.dart';
 
-void main() {
-  runApp(const ProviderScope(child: MusicboxApp()));
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Tee debugPrint output into the in-memory log buffer used by bug reports.
+  final originalDebugPrint = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    if (message != null) LogBuffer.instance.log(message);
+    originalDebugPrint(message, wrapWidth: wrapWidth);
+  };
+
+  await CrashCapture.init();
+
+  // Build the bug-report config once, before runApp, so the override is
+  // ready when the first widget reads it.
+  final prefs = await SharedPreferences.getInstance();
+
+  // Forward declaration so the container's overrides can close over it.
+  late final ProviderContainer container;
+
+  final bugReportConfig = BugReportConfig(
+    appName: 'Musicbox',
+    appVersion: () async {
+      try {
+        final info = await PackageInfo.fromPlatform();
+        return '${info.version}+${info.buildNumber}';
+      } catch (_) {
+        return 'unknown';
+      }
+    },
+    webUrl: prefs.getString('bug_report_web_url'),
+    appContexts: [
+      AppContext(
+        name: 'project-digest',
+        label: 'Project digest',
+        build: () async =>
+            buildProjectDigest(container.read(projectProvider).value),
+      ),
+      AppContext(
+        name: 'project-snapshot',
+        label: 'Project JSON snapshot',
+        sizeLimitBytes: 32 * 1024,
+        build: () async {
+          final p = container.read(projectProvider).value;
+          return p == null ? '' : jsonEncode(p.toJson());
+        },
+      ),
+    ],
+  );
+
+  container = ProviderContainer(
+    overrides: [
+      bugReportConfigProvider.overrideWithValue(bugReportConfig),
+    ],
+  );
+
+  runZonedGuarded(
+    () => runApp(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MusicboxApp(),
+      ),
+    ),
+    (error, stack) => CrashCapture.recordError(error, stack),
+  );
 }
 
 class MusicboxApp extends StatelessWidget {
@@ -153,6 +225,16 @@ class _RootPageState extends ConsumerState<_RootPage> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report_outlined, color: Colors.white54),
+            tooltip: 'Bug report',
+            onPressed: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const BugReportSheet(),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.file_upload_outlined, color: Colors.white54),
             tooltip: 'Export WAV',

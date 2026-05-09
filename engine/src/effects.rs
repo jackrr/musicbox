@@ -129,7 +129,7 @@ impl Delay {
     }
 
     pub fn set_time_samples(&mut self, samples: usize) {
-        self.delay_samples = samples.min(MAX_DELAY_SAMPLES - 1).max(1);
+        self.delay_samples = samples.clamp(1, MAX_DELAY_SAMPLES - 1);
     }
 
     pub fn set_feedback(&mut self, fb: f32) { self.feedback = fb.clamp(0.0, 0.95); }
@@ -234,6 +234,7 @@ impl EffectsChain {
             let mut reverb_send = 0.0f32;
             let mut delay_send  = 0.0f32;
 
+            #[allow(clippy::needless_range_loop)]
             for t in 0..NUM_TRACKS {
                 let fx  = &self.track_fx[t];
                 let raw = if f < track_bufs[t].len() { track_bufs[t][f] } else { 0.0 };
