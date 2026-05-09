@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: write          # create releases, upload assets
+  pull-requests: write     # post the APK download comment
+
 jobs:
   build:
     runs-on: [self-hosted, linux, musicbox-builder]
