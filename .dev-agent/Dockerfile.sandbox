@@ -73,7 +73,7 @@ RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --p
  && cargo install cargo-ndk
 
 # ---- Flutter -----------------------------------------------------------------
-ARG FLUTTER_VERSION=3.24.3
+ARG FLUTTER_VERSION=3.41.6
 RUN curl -fsSL -o /tmp/flutter.tar.xz \
       https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz \
  && tar -xJf /tmp/flutter.tar.xz -C ${HOME} \
