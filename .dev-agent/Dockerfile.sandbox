@@ -1,0 +1,94 @@
+# Sandbox toolchain image for musicbox dev-agent sessions.
+#
+# Contains the full Flutter + Rust + Android toolchain needed to build,
+# test, and produce an APK from a freshly-cloned worktree.
+#
+# This image is built once by Component 1 (dev-agent-server) on first
+# session creation (per `sandbox.build` in .dev-agent/config.yaml) and
+# reused for subsequent sessions. The runner image (.dev-agent/runner/
+# Dockerfile) extends this with the GitHub Actions runner agent.
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# ---- base packages -----------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash ca-certificates curl wget git gnupg unzip zip xz-utils \
+        build-essential pkg-config libssl-dev \
+        openjdk-17-jdk-headless \
+        python3 \
+        nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---- gh CLI ------------------------------------------------------------------
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---- non-root user -----------------------------------------------------------
+ARG USER=agent
+ARG UID=1000
+RUN useradd -m -u ${UID} -s /bin/bash ${USER}
+
+ENV HOME=/home/${USER}
+ENV ANDROID_HOME=${HOME}/android-sdk \
+    ANDROID_SDK_ROOT=${HOME}/android-sdk \
+    ANDROID_NDK_VERSION=28.2.13676358 \
+    FLUTTER_HOME=${HOME}/flutter \
+    CARGO_HOME=${HOME}/.cargo \
+    RUSTUP_HOME=${HOME}/.rustup
+ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION} \
+    PATH=${HOME}/.cargo/bin:${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}
+
+USER ${USER}
+WORKDIR ${HOME}
+
+# ---- Android cmdline-tools, platform, build-tools, NDK -----------------------
+ARG ANDROID_CMDLINE_VERSION=11076708
+ARG CMAKE_VERSION=3.22.1
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
+ && curl -fsSL -o /tmp/cmdline-tools.zip \
+      https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_VERSION}_latest.zip \
+ && unzip -q /tmp/cmdline-tools.zip -d ${ANDROID_HOME}/cmdline-tools \
+ && mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
+ && rm /tmp/cmdline-tools.zip \
+ && yes | sdkmanager --licenses >/dev/null \
+ && sdkmanager \
+      "platform-tools" \
+      "platforms;android-34" \
+      "platforms;android-35" \
+      "platforms;android-36" \
+      "build-tools;34.0.0" \
+      "build-tools;35.0.0" \
+      "ndk;${ANDROID_NDK_VERSION}" \
+      "cmake;${CMAKE_VERSION}"
+
+# ---- Rust + Android targets + cargo-ndk --------------------------------------
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+ && rustup target add aarch64-linux-android armv7-linux-androideabi \
+                      x86_64-linux-android i686-linux-android \
+ && cargo install cargo-ndk
+
+# ---- Flutter -----------------------------------------------------------------
+ARG FLUTTER_VERSION=3.41.6
+RUN curl -fsSL -o /tmp/flutter.tar.xz \
+      https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz \
+ && tar -xJf /tmp/flutter.tar.xz -C ${HOME} \
+ && rm /tmp/flutter.tar.xz \
+ && flutter config --no-analytics --no-cli-animations \
+ && flutter precache --android --no-ios --no-linux --no-windows --no-macos --no-web \
+ && yes | flutter doctor --android-licenses >/dev/null || true
+
+# ---- qrcode for the build-apk workflow's QR step -----------------------------
+RUN npm config set prefix ${HOME}/.npm-global \
+ && ${HOME}/.npm-global/bin/npm install -g qrcode || npm install -g --prefix ${HOME}/.npm-global qrcode
+ENV PATH=${HOME}/.npm-global/bin:${PATH}
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
