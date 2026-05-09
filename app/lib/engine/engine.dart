@@ -32,6 +32,21 @@ class AudioEngine {
     _initialized = true;
   }
 
+  /// Install the Rust panic hook. `dir` is the directory where the engine
+  /// will write `panic.log` on a panic. Idempotent; safe to call before or
+  /// after [init].
+  void installPanicHook(String dir) {
+    final bytes = utf8.encode(dir);
+    final p = calloc<Uint8>(bytes.length + 1);
+    try {
+      for (var i = 0; i < bytes.length; i++) { p[i] = bytes[i]; }
+      p[bytes.length] = 0;
+      _bindings.installPanicHook(p.cast());
+    } finally {
+      calloc.free(p);
+    }
+  }
+
   void dispose() {
     if (!_initialized) return;
     _bindings.destroy(_ptr);

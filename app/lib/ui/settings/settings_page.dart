@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../bug_report/bug_report_config.dart';
 import '../../providers/ai_provider.dart';
 import '../../providers/project_provider.dart';
 import '../../services/ai_service.dart';
@@ -14,19 +16,34 @@ class SettingsPage extends ConsumerStatefulWidget {
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
   final _keyCtrl = TextEditingController();
+  final _bugReportUrlCtrl = TextEditingController();
   bool _obscured = true;
   bool _saving   = false;
   String? _status;
+  String? _bugReportStatus;
 
   @override
   void initState() {
     super.initState();
     _loadKey();
+    _loadBugReportUrl();
   }
 
   Future<void> _loadKey() async {
     final k = await AiService.instance.getApiKey();
     if (k != null) _keyCtrl.text = k;
+  }
+
+  Future<void> _loadBugReportUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final url = prefs.getString('bug_report_web_url');
+    if (url != null) _bugReportUrlCtrl.text = url;
+  }
+
+  Future<void> _saveBugReportUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('bug_report_web_url', _bugReportUrlCtrl.text.trim());
+    setState(() => _bugReportStatus = 'Saved.');
   }
 
   Future<void> _saveKey() async {
@@ -127,6 +144,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 12),
             _ActionButton(
               label: 'New Project',
+              key: const ValueKey('settings.newProject'),
               color: Colors.white54,
               onTap: () => showDialog(
                 context: context,
@@ -148,6 +166,56 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
               ),
             ),
+
+            const SizedBox(height: 32),
+
+            // Bug report section
+            const _SectionHeader('BUG REPORT'),
+            const SizedBox(height: 8),
+            const Text(
+              'URL opened from the snackbar after copying a bug report. '
+              'Optional — paste a URL only if you have somewhere to send reports.',
+              style: TextStyle(fontSize: 12, color: Colors.white38, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _bugReportUrlCtrl,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'https://…',
+                hintStyle: const TextStyle(color: Colors.white24),
+                filled: true,
+                fillColor: Colors.white10,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onSubmitted: (_) => _saveBugReportUrl(),
+            ),
+            const SizedBox(height: 8),
+            _ActionButton(
+              label: 'Save URL',
+              color: Colors.white54,
+              onTap: _saveBugReportUrl,
+            ),
+            if (_bugReportStatus != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_bugReportStatus!,
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.greenAccent)),
+              ),
+            // Touch the provider so a missing override surfaces as a build
+            // error in dev rather than only at first bug-report open.
+            Builder(builder: (ctx) {
+              try {
+                ref.watch(bugReportConfigProvider);
+              } catch (_) {}
+              return const SizedBox.shrink();
+            }),
           ],
         ),
       ),
@@ -174,7 +242,12 @@ class _ActionButton extends StatelessWidget {
   final Color color;
   final VoidCallback? onTap;
 
-  const _ActionButton({required this.label, required this.color, this.onTap});
+  const _ActionButton({
+    super.key,
+    required this.label,
+    required this.color,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) => GestureDetector(

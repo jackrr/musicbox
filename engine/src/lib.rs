@@ -34,6 +34,10 @@ use std::sync::{
     mpsc, Arc,
 };
 
+use std::ffi::CStr;
+use std::os::raw::c_char;
+use std::sync::Once;
+
 use audio::AudioStream;
 use commands::FfiCommand;
 use export::{ExportState, render_wav};
@@ -105,6 +109,52 @@ impl Engine {
 // ---------------------------------------------------------------------------
 // C ABI exports
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Crash capture: install a panic hook that writes the panic info to
+// `<dir>/panic.log`. The Flutter side (CrashCapture) reads this file on the
+// next app start and folds it into the bug-report `<recent-logs>` section.
+//
+// Called from Dart before `musicbox_engine_create`. Idempotent.
+// ---------------------------------------------------------------------------
+
+static PANIC_HOOK_INSTALLED: Once = Once::new();
+
+/// Install the bug-report panic hook. `dir` is a UTF-8, null-terminated path
+/// (typically the app documents directory). Stored in a static so the hook
+/// closure can reach it.
+///
+/// # Safety
+/// `dir` must be a valid null-terminated UTF-8 C string for the duration of
+/// this call.
+#[no_mangle]
+pub unsafe extern "C" fn musicbox_engine_install_panic_hook(dir: *const c_char) {
+    if dir.is_null() {
+        return;
+    }
+    let path = match CStr::from_ptr(dir).to_str() {
+        Ok(s) => s.to_owned(),
+        Err(_) => return,
+    };
+    PANIC_HOOK_INSTALLED.call_once(|| {
+        let saved = std::sync::Mutex::new(path);
+        std::panic::set_hook(Box::new(move |info| {
+            let p = match saved.lock() {
+                Ok(g) => g.clone(),
+                Err(_) => return,
+            };
+            let line = format!(
+                "thread '{}' {}\n",
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                info
+            );
+            let _ = std::fs::write(
+                std::path::Path::new(&p).join("panic.log"),
+                line,
+            );
+        }));
+    });
+}
 
 #[no_mangle]
 pub extern "C" fn musicbox_engine_create() -> *mut Engine {

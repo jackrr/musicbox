@@ -35,6 +35,11 @@ dependencies:
   permission_handler: ^11.0.0
   cupertino_icons: ^1.0.8
 
+  # Bug report module
+  package_info_plus: ^8.1.3
+  shared_preferences: ^2.3.3
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

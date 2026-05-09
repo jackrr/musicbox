@@ -45,6 +45,13 @@ typedef _GetSamplePeaksDart   = int Function(Pointer<Void>, int, Pointer<Float>,
 typedef _GetSampleDurationNative = Float Function(Pointer<Void>, Uint8);
 typedef _GetSampleDurationDart   = double Function(Pointer<Void>, int);
 
+typedef _InstallPanicHookNative = Void Function(Pointer<Utf8Stub>);
+typedef _InstallPanicHookDart   = void Function(Pointer<Utf8Stub>);
+
+/// Opaque tag for a null-terminated UTF-8 C string passed by the panic-hook
+/// installer. We only ever hand it raw bytes so a stub class is enough.
+final class Utf8Stub extends Opaque {}
+
 // --- EngineBindings ------------------------------------------------------------
 
 /// Raw FFI bindings to the Rust engine shared library.
@@ -67,6 +74,7 @@ class EngineBindings {
   late final bool Function(Pointer<Void>, int) hasSample;
   late final int    Function(Pointer<Void>, int, Pointer<Float>, int) getSamplePeaks;
   late final double Function(Pointer<Void>, int) getSampleDuration;
+  late final void Function(Pointer<Utf8Stub>) installPanicHook;
 
   EngineBindings() : _lib = _openLibrary() {
     create = _lib.lookupFunction<_CreateNative, _CreateDart>(
@@ -97,6 +105,8 @@ class EngineBindings {
         'musicbox_engine_get_sample_peaks');
     getSampleDuration = _lib.lookupFunction<_GetSampleDurationNative, _GetSampleDurationDart>(
         'musicbox_engine_get_sample_duration');
+    installPanicHook = _lib.lookupFunction<_InstallPanicHookNative, _InstallPanicHookDart>(
+        'musicbox_engine_install_panic_hook');
   }
 
   static DynamicLibrary _openLibrary() {
