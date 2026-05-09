@@ -7,8 +7,9 @@
 # Build:
 #   docker build -t musicbox-runner -f .dev-agent/runner/Dockerfile .
 #
-# Run (one-shot, ephemeral; recommended):
-#   docker run --rm -it \
+# Run (long-lived; first start needs RUNNER_TOKEN, subsequent starts don't):
+#   podman run --rm \
+#     -v musicbox-runner-state:/home/agent/actions-runner:Z \
 #     -e REPO_URL=https://github.com/<owner>/musicbox \
 #     -e RUNNER_TOKEN=<token from repo Settings → Actions → Runners> \
 #     -e RUNNER_NAME=musicbox-runner-1 \

@@ -14,7 +14,7 @@ on the server beyond the contract documented in `AGENT_CONTRACTS.md`.
 | `allowlist.txt` | Egress hostnames the sandbox proxy should allow. Used by Component 1's proxy. |
 | `Dockerfile.sandbox` | Toolchain image used by per-session agent containers (Flutter + Rust + Android NDK). |
 | `runner/Dockerfile` | Self-hosted GitHub Actions runner image. Reuses the sandbox image as its base. |
-| `runner/entrypoint.sh` | Registers the runner with the repo on start, deregisters on exit. |
+| `runner/entrypoint.sh` | Registers the runner on first start; on subsequent starts skips straight to `run.sh`. |
 
 ## How it fits together
 
@@ -41,8 +41,10 @@ docker build -t musicbox-runner:latest -f .dev-agent/runner/Dockerfile .dev-agen
 
 # 3. Get a runner registration token from:
 #      GitHub → repo Settings → Actions → Runners → New self-hosted runner
-#    Then start the runner (ephemeral; relaunch via your supervisor between jobs):
-docker run --rm \
+#    Then start the runner. The named volume persists registration across
+#    restarts; RUNNER_TOKEN is only consulted on first start.
+podman run --rm \
+  -v musicbox-runner-state:/home/agent/actions-runner:Z \
   -e REPO_URL=https://github.com/<owner>/musicbox \
   -e RUNNER_TOKEN=<token> \
   -e RUNNER_LABELS=musicbox-builder \
