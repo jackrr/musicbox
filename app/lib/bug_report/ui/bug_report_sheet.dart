@@ -283,7 +283,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
         SwitchListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
-          activeColor: Colors.greenAccent,
+          activeThumbColor: Colors.greenAccent,
           title: const Text('Recent logs',
               style: TextStyle(color: Colors.white, fontSize: 13)),
           subtitle: const Text('last 120 lines + any pending crash',
@@ -298,7 +298,7 @@ class _BugReportSheetState extends ConsumerState<BugReportSheet> {
           SwitchListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            activeColor: Colors.greenAccent,
+            activeThumbColor: Colors.greenAccent,
             title: Text(s.label,
                 style: const TextStyle(color: Colors.white, fontSize: 13)),
             subtitle: Text(

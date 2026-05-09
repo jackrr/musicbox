@@ -399,9 +399,18 @@ pub unsafe extern "C" fn musicbox_engine_get_sample_duration(
     }
 }
 
-/// No-op stubs (transport handled via send_command kind=4).
+/// No-op stub. Transport is handled via `musicbox_engine_send_command`
+/// with `kind=4`. Kept for ABI compatibility.
+///
+/// # Safety
+/// `_` is unused; any pointer (including null) is accepted.
 #[no_mangle]
 pub unsafe extern "C" fn musicbox_engine_start(_: *mut Engine) {}
+
+/// No-op stub. See [`musicbox_engine_start`].
+///
+/// # Safety
+/// `_` is unused; any pointer (including null) is accepted.
 #[no_mangle]
 pub unsafe extern "C" fn musicbox_engine_stop(_: *mut Engine) {}
 
