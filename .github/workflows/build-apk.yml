@@ -26,6 +26,15 @@ jobs:
           storeFile=../../../release.keystore
           EOF
 
+      - name: Verify keystore
+        run: |
+          keytool -list -keystore release.keystore \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias    "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            > /dev/null \
+          || { echo "::error::Keystore secret(s) wrong. Verify ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEYSTORE_BASE64 in repo settings."; exit 1; }
+          echo "Keystore OK"
+
       - name: Flutter pub get
         working-directory: app
         run: flutter pub get

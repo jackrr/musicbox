@@ -39,7 +39,7 @@ RUN useradd -m -u ${UID} -s /bin/bash ${USER}
 ENV HOME=/home/${USER}
 ENV ANDROID_HOME=${HOME}/android-sdk \
     ANDROID_SDK_ROOT=${HOME}/android-sdk \
-    ANDROID_NDK_VERSION=26.3.11579264 \
+    ANDROID_NDK_VERSION=28.2.13676358 \
     FLUTTER_HOME=${HOME}/flutter \
     CARGO_HOME=${HOME}/.cargo \
     RUSTUP_HOME=${HOME}/.rustup
@@ -51,8 +51,7 @@ WORKDIR ${HOME}
 
 # ---- Android cmdline-tools, platform, build-tools, NDK -----------------------
 ARG ANDROID_CMDLINE_VERSION=11076708
-ARG ANDROID_PLATFORM=android-34
-ARG ANDROID_BUILD_TOOLS=34.0.0
+ARG CMAKE_VERSION=3.22.1
 RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
  && curl -fsSL -o /tmp/cmdline-tools.zip \
       https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_VERSION}_latest.zip \
@@ -62,9 +61,13 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
  && yes | sdkmanager --licenses >/dev/null \
  && sdkmanager \
       "platform-tools" \
-      "platforms;${ANDROID_PLATFORM}" \
-      "build-tools;${ANDROID_BUILD_TOOLS}" \
-      "ndk;${ANDROID_NDK_VERSION}"
+      "platforms;android-34" \
+      "platforms;android-35" \
+      "platforms;android-36" \
+      "build-tools;34.0.0" \
+      "build-tools;35.0.0" \
+      "ndk;${ANDROID_NDK_VERSION}" \
+      "cmake;${CMAKE_VERSION}"
 
 # ---- Rust + Android targets + cargo-ndk --------------------------------------
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
