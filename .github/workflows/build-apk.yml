@@ -1,0 +1,91 @@
+name: Build APK
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, musicbox-builder]
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      # Toolchains pre-installed in runner image — no setup steps needed.
+
+      - name: Build native libs
+        run: ./scripts/build_android.sh
+
+      - name: Write signing config
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          cat > app/android/key.properties <<EOF
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=../../../../release.keystore
+          EOF
+
+      - name: Flutter pub get
+        working-directory: app
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: app
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.sha }}
+          path: app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          retention-days: 30
+
+      - name: Detect agent branch
+        id: detect
+        run: |
+          if [[ "${{ github.head_ref }}" == agent/* ]]; then
+            echo "is_agent=true" >> $GITHUB_OUTPUT
+            echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "is_agent=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release
+        if: steps.detect.outputs.is_agent == 'true'
+        id: release
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          # Tag MUST match .dev-agent/config.yaml's release_tag_pattern
+          TAG="pr-${{ github.event.number }}-${{ steps.detect.outputs.short_sha }}"
+          gh release create "$TAG" \
+            app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            --prerelease \
+            --title "Agent PR #${{ github.event.number }} (${{ steps.detect.outputs.short_sha }})" \
+            --notes "Auto-built from ${{ github.head_ref }}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "apk_url=$(gh release view "$TAG" --json assets -q '.assets[0].browserDownloadUrl')" >> $GITHUB_OUTPUT
+
+      - name: QR code
+        if: steps.detect.outputs.is_agent == 'true'
+        run: |
+          node -e "require('qrcode').toFile('/tmp/qr.png', '${{ steps.release.outputs.apk_url }}', { width: 300 })"
+
+      - name: Upload QR
+        if: steps.detect.outputs.is_agent == 'true'
+        id: qr
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh release upload "${{ steps.release.outputs.tag }}" /tmp/qr.png
+          echo "qr_url=$(gh release view "${{ steps.release.outputs.tag }}" --json assets -q '.assets[]|select(.name=="qr.png")|.browserDownloadUrl')" >> $GITHUB_OUTPUT
+
+      - name: PR comment
+        if: steps.detect.outputs.is_agent == 'true'
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          gh pr comment ${{ github.event.number }} --body "
+          ### 📦 APK Ready
+          **Download:** ${{ steps.release.outputs.apk_url }}
+          <img src='${{ steps.qr.outputs.qr_url }}' width='200'/>
+          Built from \`${{ github.head_ref }}\` @ \`${{ steps.detect.outputs.short_sha }}\`
+          "
