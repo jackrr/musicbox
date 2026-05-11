@@ -61,10 +61,7 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
  && yes | sdkmanager --licenses >/dev/null \
  && sdkmanager \
       "platform-tools" \
-      "platforms;android-34" \
       "platforms;android-35" \
-      "platforms;android-36" \
-      "build-tools;34.0.0" \
       "build-tools;35.0.0" \
       "ndk;${ANDROID_NDK_VERSION}" \
       "cmake;${CMAKE_VERSION}"
@@ -72,7 +69,6 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
 # ---- Rust + Android targets + cargo-ndk --------------------------------------
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
  && rustup target add aarch64-linux-android armv7-linux-androideabi \
-                      x86_64-linux-android i686-linux-android \
  && cargo install cargo-ndk
 
 # ---- Flutter -----------------------------------------------------------------
@@ -86,8 +82,9 @@ RUN curl -fsSL -o /tmp/flutter.tar.xz \
  && yes | flutter doctor --android-licenses >/dev/null || true
 
 # ---- qrcode for the build-apk workflow's QR step -----------------------------
+# npm config set prefix redirects where globals land; the binary stays at /usr/bin/npm.
 RUN npm config set prefix ${HOME}/.npm-global \
- && ${HOME}/.npm-global/bin/npm install -g qrcode || npm install -g --prefix ${HOME}/.npm-global qrcode
+ && npm install -g qrcode
 ENV PATH=${HOME}/.npm-global/bin:${PATH}
 
 WORKDIR /workspace
