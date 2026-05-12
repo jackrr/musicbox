@@ -12,6 +12,8 @@
 
 set -euo pipefail
 
+echo "[entrypoint] starting ($(date -Is))" >&2
+
 # Mirror /opt/flutter into the writable tmpfs at /home/agent/flutter.
 # Strategy: symlink everything *except* bin/cache, which Flutter writes to
 # (stamp files like engine.stamp, flutter_tools.stamp). Large subdirs inside
@@ -48,6 +50,10 @@ for item in /opt/flutter/*/; do
   [ "$name" = "bin" ] && continue
   ln -sfn "/opt/flutter/$name" "/home/agent/flutter/$name"
 done
+
+echo "[entrypoint] flutter mirror ready ($(du -sh /home/agent/flutter 2>/dev/null | cut -f1))" >&2
+echo "[entrypoint] tmpfs usage: $(df -h /home/agent 2>/dev/null | tail -1)" >&2
+echo "[entrypoint] exec: $*" >&2
 
 # PATH for docker exec sessions is set via /etc/profile.d/toolchain.sh (login shells)
 # and via ENV in the Dockerfile (non-login shells). No export needed here.
