@@ -105,6 +105,29 @@ RUN npm config set prefix ${NPM_GLOBAL} \
 # ---- make everything under /opt world-readable/executable --------------------
 RUN chmod -R a+rX /opt
 
+# ---- profile.d snippet: restore tool PATH for login shells ------------------
+# When a login shell starts, /etc/profile resets PATH to the Debian default,
+# wiping out the Docker ENV PATH. This snippet runs after /etc/profile and
+# puts the toolchain directories back on PATH for every user/shell type.
+RUN printf '%s\n' \
+      '# musicbox toolchain — added by Dockerfile.sandbox' \
+      'export CARGO_HOME="${CARGO_HOME:-/opt/cargo}"' \
+      'export RUSTUP_HOME="${RUSTUP_HOME:-/opt/rustup}"' \
+      'export FLUTTER_HOME=/home/agent/flutter' \
+      'export ANDROID_HOME=/opt/android-sdk' \
+      'export ANDROID_SDK_ROOT=/opt/android-sdk' \
+      'export NPM_GLOBAL=/opt/npm-global' \
+      'export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"' \
+      'case ":${PATH}:" in' \
+      '  *":/opt/cargo/bin:"*) ;;' \
+      '  *) export PATH="/opt/cargo/bin:/home/agent/flutter/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${NPM_GLOBAL}/bin:${PATH}" ;;' \
+      'esac' \
+    > /etc/profile.d/toolchain.sh \
+ && chmod 644 /etc/profile.d/toolchain.sh
+
+# ---- sandbox entrypoint ----------------------------------------------------
+COPY --chmod=755 entrypoint.sandbox.sh /usr/local/bin/entrypoint.sh
+
 # ---- non-root user -----------------------------------------------------------
 ARG USER=agent
 ARG UID=1000
@@ -117,8 +140,10 @@ RUN useradd -m -u ${UID} -s /bin/bash ${USER}
 ENV HOME=/home/${USER} \
     CARGO_HOME=/home/${USER}/.cargo \
     PUB_CACHE=/home/${USER}/.pub-cache \
-    GRADLE_USER_HOME=/home/${USER}/.gradle
+    GRADLE_USER_HOME=/home/${USER}/.gradle \
+    PATH=/opt/cargo/bin:/home/agent/flutter/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 USER ${USER}
 WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/bin/bash"]
