@@ -7,6 +7,15 @@
 # session creation (per `sandbox.build` in .dev-agent/config.yaml) and
 # reused for subsequent sessions. The runner image (.dev-agent/runner/
 # Dockerfile) extends this with the GitHub Actions runner agent.
+#
+# Layout note:
+#   The harness runs this image with a read-only root and a ~1 GB tmpfs
+#   mounted over /home/agent. At mount time the kernel copies the
+#   existing contents of /home/agent into that tmpfs (tmpcopyup), so
+#   /home/agent must stay small. All toolchains therefore live under
+#   /opt/<tool> (read-only at runtime), while only per-user caches
+#   (~/.cargo/registry, ~/.npm, ~/.gradle, ~/.pub-cache, …) land on the
+#   writable tmpfs at $HOME.
 
 FROM debian:bookworm-slim
 
@@ -31,23 +40,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
  && apt-get update && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- non-root user -----------------------------------------------------------
-ARG USER=agent
-ARG UID=1000
-RUN useradd -m -u ${UID} -s /bin/bash ${USER}
-
-ENV HOME=/home/${USER}
-ENV ANDROID_HOME=${HOME}/android-sdk \
-    ANDROID_SDK_ROOT=${HOME}/android-sdk \
+# ---- toolchain locations (all under /opt, read-only at runtime) --------------
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
     ANDROID_NDK_VERSION=28.2.13676358 \
-    FLUTTER_HOME=${HOME}/flutter \
-    CARGO_HOME=${HOME}/.cargo \
-    RUSTUP_HOME=${HOME}/.rustup
+    FLUTTER_HOME=/opt/flutter \
+    CARGO_HOME=/opt/cargo \
+    RUSTUP_HOME=/opt/rustup \
+    NPM_GLOBAL=/opt/npm-global
 ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION} \
-    PATH=${HOME}/.cargo/bin:${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}
+    PATH=${CARGO_HOME}/bin:${FLUTTER_HOME}/bin:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${NPM_GLOBAL}/bin:${PATH}
 
-USER ${USER}
-WORKDIR ${HOME}
+# All toolchain installs run as root into /opt so they survive a read-only
+# rootfs at runtime. We chmod a+rX at the end so uid 1000 can read/execute.
+WORKDIR /opt
 
 # ---- Android cmdline-tools, platform, build-tools, NDK -----------------------
 ARG ANDROID_CMDLINE_VERSION=11076708
@@ -67,25 +73,52 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
       "cmake;${CMAKE_VERSION}"
 
 # ---- Rust + Android targets + cargo-ndk --------------------------------------
-RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal \
+# Installed with CARGO_HOME=/opt/cargo, RUSTUP_HOME=/opt/rustup so binaries
+# and toolchains live under /opt. At runtime we override CARGO_HOME to
+# $HOME/.cargo (see end of file) so the registry/cache lands on the tmpfs.
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
  && rustup target add aarch64-linux-android armv7-linux-androideabi \
- && cargo install cargo-ndk
+ && cargo install cargo-ndk \
+ && rm -rf ${CARGO_HOME}/registry ${CARGO_HOME}/git
 
 # ---- Flutter -----------------------------------------------------------------
+# Flutter is a git checkout; it wants to call `git` against its own repo.
+# We mark it as a safe directory globally so any user can invoke flutter.
 ARG FLUTTER_VERSION=3.41.6
 RUN curl -fsSL -o /tmp/flutter.tar.xz \
       https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz \
- && tar -xJf /tmp/flutter.tar.xz -C ${HOME} \
+ && tar -xJf /tmp/flutter.tar.xz -C /opt \
  && rm /tmp/flutter.tar.xz \
+ && git config --system --add safe.directory ${FLUTTER_HOME} \
  && flutter config --no-analytics --no-cli-animations \
  && flutter precache --android --no-ios --no-linux --no-windows --no-macos --no-web \
- && yes | flutter doctor --android-licenses >/dev/null || true
+ && yes | flutter doctor --android-licenses >/dev/null || true \
+ && flutter --version
 
 # ---- qrcode for the build-apk workflow's QR step -----------------------------
-# npm config set prefix redirects where globals land; the binary stays at /usr/bin/npm.
-RUN npm config set prefix ${HOME}/.npm-global \
- && npm install -g qrcode
-ENV PATH=${HOME}/.npm-global/bin:${PATH}
+# Global npm prefix lives under /opt so the package files are read-only at
+# runtime. Per-user npm cache (~/.npm) stays under $HOME automatically.
+RUN npm config set prefix ${NPM_GLOBAL} \
+ && npm install -g qrcode \
+ && rm -rf /root/.npm
 
+# ---- make everything under /opt world-readable/executable --------------------
+RUN chmod -R a+rX /opt
+
+# ---- non-root user -----------------------------------------------------------
+ARG USER=agent
+ARG UID=1000
+RUN useradd -m -u ${UID} -s /bin/bash ${USER}
+
+# At runtime, redirect per-user caches into $HOME so they land on the
+# writable tmpfs. The cargo/rustup *binaries* still come from /opt/cargo/bin
+# (on PATH); only the registry/git caches and any user-installed crates go
+# into $HOME/.cargo. RUSTUP_HOME stays under /opt — toolchains are immutable.
+ENV HOME=/home/${USER} \
+    CARGO_HOME=/home/${USER}/.cargo \
+    PUB_CACHE=/home/${USER}/.pub-cache \
+    GRADLE_USER_HOME=/home/${USER}/.gradle
+
+USER ${USER}
 WORKDIR /workspace
 CMD ["/bin/bash"]
