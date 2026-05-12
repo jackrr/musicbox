@@ -146,4 +146,4 @@ ENV HOME=/home/${USER} \
 USER ${USER}
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["sleep", "infinity"]
+CMD ["/bin/bash"]
