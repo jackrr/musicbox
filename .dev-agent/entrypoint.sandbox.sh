@@ -22,4 +22,6 @@ for item in /opt/flutter/*/; do
   ln -sfn "/opt/flutter/$name" "/home/agent/flutter/$name"
 done
 
+# PATH for docker exec sessions is set via /etc/profile.d/toolchain.sh (login shells)
+# and via ENV in the Dockerfile (non-login shells). No export needed here.
 exec "$@"

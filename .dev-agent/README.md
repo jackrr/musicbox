@@ -1,9 +1,9 @@
 # `.dev-agent/` — musicbox integration with `dev-agent-server`
 
 This directory is the integration point between this repo and a
-[`dev-agent-server`](../AGENT_CONTRACTS.md) instance (Component 1). It is
-read by the server at session start; this repo (musicbox) does not depend
-on the server beyond the contract documented in `AGENT_CONTRACTS.md`.
+[`dev-agent-server`](https://github.com/jackrr/dev-agent-server) instance.
+It is read by the server at session start; this repo (musicbox) does not
+depend on the server beyond the contracts documented in `AGENT_CONTRACTS.md`.
 
 ## Files
 
@@ -34,10 +34,10 @@ on the server beyond the contract documented in `AGENT_CONTRACTS.md`.
 
 ```sh
 # 1. Build the sandbox base image (once, in this repo's root).
-docker build -t musicbox-sandbox:latest -f .dev-agent/Dockerfile.sandbox .
+podman build -t musicbox-sandbox:latest -f .dev-agent/Dockerfile.sandbox .
 
 # 2. Build the runner image (extends the sandbox).
-docker build -t musicbox-runner:latest -f .dev-agent/runner/Dockerfile .dev-agent
+podman build -t musicbox-runner:latest -f .dev-agent/runner/Dockerfile .dev-agent
 
 # 3. Get a runner registration token from:
 #      GitHub → repo Settings → Actions → Runners → New self-hosted runner
