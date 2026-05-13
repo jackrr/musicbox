@@ -12,3 +12,21 @@ Useful commands:
 
 The Rust↔Dart command protocol is documented in `CLAUDE.md`. The enums in
 `app/lib/engine/types.dart` MUST match `engine/src/commands.rs` exactly.
+
+## Shipping a fix
+
+When your fix is ready and tests pass, use the `open_pr` tool to ship it.
+This commits all staged changes, pushes the session branch, and opens a PR
+against `main`. **Do not push or create PRs manually** — always use the
+`open_pr` tool so the server can track the PR and surface build artifacts.
+
+Before calling `open_pr`:
+1. `cd engine && cargo check && cargo test` — verify Rust compiles and tests pass.
+2. `cd app && flutter analyze && flutter test` — verify Dart analysis and tests pass.
+3. If you changed Rust code, run `./scripts/build_android.sh` to rebuild the
+   native lib (the CI build will fail without the updated `.so` files).
+4. Review your changes with `git diff` to make sure nothing is missing.
+
+The `open_pr` tool takes a `title` (used as the PR title and commit message)
+and a `body` (Markdown PR description explaining the change). Write a clear
+title and body so the reviewer understands the fix without extra context.
