@@ -49,6 +49,12 @@ impl Sampler {
 
     pub fn set_sample(&mut self, track_id: u8, data: Arc<Vec<f32>>, source_rate: f32) {
         if let Some(t) = self.tracks.get_mut(track_id as usize) {
+            // Reject samples that are too small for interpolation
+            if data.len() < 2 {
+                t.data = None;
+                t.playing = false;
+                return;
+            }
             t.source_rate = source_rate;
             t.data = Some(data);
             t.playing = false;
@@ -87,13 +93,25 @@ impl Sampler {
         if !t.playing { return; }
         let data = match &t.data { Some(d) => Arc::clone(d), None => return };
 
-        // End position respects trim_end
+        // Guard against empty or single-sample data
+        if data.len() < 2 {
+            t.playing = false;
+            return;
+        }
+
+        // End position respects trim_end. We subtract 1 to ensure we never try to
+        // interpolate at the last position (which would access data[len]).
         let end_pos = ((t.trim_end as f64) * data.len() as f64).ceil() as usize;
-        let end_pos = end_pos.min(data.len());
+        let end_pos = end_pos.min(data.len()).saturating_sub(1);
 
         for f in 0..n {
             let pos = t.read_head as usize;
-            if pos + 1 >= end_pos { t.playing = false; break; }
+            
+            // Stop if we've reached the end or if interpolation would go out of bounds
+            if pos >= end_pos || pos + 1 >= data.len() {
+                t.playing = false;
+                break;
+            }
 
             // Linear interpolation
             let frac   = t.read_head.fract() as f32;
@@ -150,4 +168,132 @@ pub fn load_wav(path: &str) -> Result<(Vec<f32>, u32), Box<dyn std::error::Error
     };
 
     Ok((mono, spec.sample_rate))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_track_full_sample() {
+        // Regression test: playing a sample with trim_end=1.0 should not panic
+        let mut sampler = Sampler::new(44100.0);
+        
+        // Create a small test sample (10 samples at 1.0)
+        let sample_data = vec![1.0; 10];
+        sampler.set_sample(0, Arc::new(sample_data), 44100.0);
+        
+        // Trigger playback
+        sampler.note_on(0, 60, 1.0);
+        
+        // Render without panicking
+        let mut buf = vec![0.0; 256];
+        sampler.render_track(0, &mut buf, 256);
+        
+        // Should have written some data
+        assert!(buf.iter().any(|&x| x != 0.0));
+    }
+
+    #[test]
+    fn test_render_track_with_trim_end() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        let sample_data = vec![1.0; 100];
+        sampler.set_sample(0, Arc::new(sample_data), 44100.0);
+        
+        // Set trim_end to 0.5 (play first half)
+        sampler.set_sample_param(0, SampleParam::TrimEnd, 0.5);
+        
+        sampler.note_on(0, 60, 1.0);
+        
+        let mut buf = vec![0.0; 256];
+        sampler.render_track(0, &mut buf, 256);
+        
+        // Should have rendered without panic
+        assert!(buf.iter().any(|&x| x != 0.0));
+    }
+
+    #[test]
+    fn test_empty_sample_rejected() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        // Try to set an empty sample
+        sampler.set_sample(0, Arc::new(vec![]), 44100.0);
+        
+        // Should not have a sample
+        assert!(!sampler.has_sample(0));
+    }
+
+    #[test]
+    fn test_single_element_sample_rejected() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        // Try to set a single-element sample
+        sampler.set_sample(0, Arc::new(vec![1.0]), 44100.0);
+        
+        // Should not have a sample (needs at least 2 for interpolation)
+        assert!(!sampler.has_sample(0));
+    }
+
+    #[test]
+    fn test_two_element_sample_accepted() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        // Two elements should be accepted
+        sampler.set_sample(0, Arc::new(vec![1.0, 1.0]), 44100.0);
+        
+        assert!(sampler.has_sample(0));
+        
+        // Should be able to play without panicking
+        sampler.note_on(0, 60, 1.0);
+        let mut buf = vec![0.0; 256];
+        sampler.render_track(0, &mut buf, 256);
+    }
+
+    #[test]
+    fn test_note_off_stops_playback() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        sampler.set_sample(0, Arc::new(vec![1.0; 100]), 44100.0);
+        sampler.note_on(0, 60, 1.0);
+        
+        let mut buf = vec![0.0; 16];
+        sampler.render_track(0, &mut buf, 16);
+        let sum_playing = buf.iter().sum::<f32>();
+        assert!(sum_playing > 0.0);
+        
+        // Stop playback
+        sampler.note_off(0);
+        
+        buf.fill(0.0);
+        sampler.render_track(0, &mut buf, 16);
+        let sum_stopped = buf.iter().sum::<f32>();
+        assert_eq!(sum_stopped, 0.0);
+    }
+
+    #[test]
+    fn test_pitch_shifting() {
+        let mut sampler = Sampler::new(44100.0);
+        
+        let sample_data = vec![1.0; 1000];
+        sampler.set_sample(0, Arc::new(sample_data), 44100.0);
+        
+        // Play at base pitch (60)
+        sampler.note_on(0, 60, 1.0);
+        let mut buf1 = vec![0.0; 64];
+        sampler.render_track(0, &mut buf1, 64);
+        
+        // Play an octave higher (72) - should play faster
+        sampler.note_on(0, 72, 1.0);
+        let mut buf2 = vec![0.0; 64];
+        sampler.render_track(0, &mut buf2, 64);
+        
+        // Both should produce output
+        assert!(buf1.iter().any(|&x| x != 0.0));
+        assert!(buf2.iter().any(|&x| x != 0.0));
+    }
 }
