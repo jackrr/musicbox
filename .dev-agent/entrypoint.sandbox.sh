@@ -25,11 +25,24 @@ echo "[entrypoint] starting ($(date -Is))" >&2
 
 mkdir -p /home/agent/flutter/bin
 
-# Symlink top-level items in bin/ except cache/
+# Symlink top-level items in bin/ except cache/ and internal/.
+# internal/ contains scripts (update_engine_version.sh) that write to
+# ../cache/engine.stamp using paths relative to their own location.
+# If internal/ is a symlink to /opt/flutter/bin/internal/, the relative
+# ../cache/ resolves to the read-only /opt/flutter/bin/cache/ instead of
+# the writable /home/agent/flutter/bin/cache/. So internal/ must also be
+# a real directory with its contents symlinked.
 for item in /opt/flutter/bin/*; do
   name=$(basename "$item")
-  [ "$name" = "cache" ] && continue
+  [ "$name" = "cache" ] || [ "$name" = "internal" ] && continue
   ln -sfn "$item" "/home/agent/flutter/bin/$name"
+done
+
+# Mirror bin/internal/ as a real dir with symlinked contents.
+mkdir -p /home/agent/flutter/bin/internal
+for item in /opt/flutter/bin/internal/*; do
+  [ ! -e "$item" ] && continue
+  ln -sfn "$item" "/home/agent/flutter/bin/internal/$(basename "$item")"
 done
 
 # Create bin/cache as a real directory; symlink subdirs, copy files (stamps)
