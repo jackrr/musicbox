@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../providers/engine_provider.dart';
@@ -30,7 +31,9 @@ class KeyboardWidget extends HookConsumerWidget {
     final engine = ref.watch(engineProvider);
 
     // Map pointer ID → MIDI pitch currently held by that finger.
-    final Map<int, int> heldNotes = {};
+    // CRITICAL: Use a hook to persist this across rebuilds so noteOff
+    // events can match their corresponding noteOn events.
+    final heldNotes = useRef<Map<int, int>>({});
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -50,26 +53,26 @@ class KeyboardWidget extends HookConsumerWidget {
           child: Listener(
             onPointerDown: (e) {
               final key = _keyAt(e.localPosition, rects);
-              if (key != null && !heldNotes.containsKey(e.pointer)) {
-                heldNotes[e.pointer] = key.pitch;
+              if (key != null && !heldNotes.value.containsKey(e.pointer)) {
+                heldNotes.value[e.pointer] = key.pitch;
                 engine.noteOn(trackId, key.pitch, 100);
               }
             },
             onPointerMove: (e) {
               final key = _keyAt(e.localPosition, rects);
-              final prev = heldNotes[e.pointer];
+              final prev = heldNotes.value[e.pointer];
               if (key != null && key.pitch != prev) {
                 if (prev != null) engine.noteOff(trackId, prev);
-                heldNotes[e.pointer] = key.pitch;
+                heldNotes.value[e.pointer] = key.pitch;
                 engine.noteOn(trackId, key.pitch, 100);
               }
             },
             onPointerUp: (e) {
-              final pitch = heldNotes.remove(e.pointer);
+              final pitch = heldNotes.value.remove(e.pointer);
               if (pitch != null) engine.noteOff(trackId, pitch);
             },
             onPointerCancel: (e) {
-              final pitch = heldNotes.remove(e.pointer);
+              final pitch = heldNotes.value.remove(e.pointer);
               if (pitch != null) engine.noteOff(trackId, pitch);
             },
             child: Stack(
