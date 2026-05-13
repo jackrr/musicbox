@@ -26,24 +26,18 @@ echo "[entrypoint] starting ($(date -Is))" >&2
 mkdir -p /home/agent/flutter/bin
 
 # Symlink top-level items in bin/ except cache/ and internal/.
-# internal/ contains scripts (update_engine_version.sh) that write to
-# ../cache/engine.stamp using paths relative to their own location.
-# If internal/ is a symlink to /opt/flutter/bin/internal/, the relative
-# ../cache/ resolves to the read-only /opt/flutter/bin/cache/ instead of
-# the writable /home/agent/flutter/bin/cache/. So internal/ must also be
-# a real directory with its contents symlinked.
 for item in /opt/flutter/bin/*; do
   name=$(basename "$item")
   [ "$name" = "cache" ] || [ "$name" = "internal" ] && continue
   ln -sfn "$item" "/home/agent/flutter/bin/$name"
 done
 
-# Mirror bin/internal/ as a real dir with symlinked contents.
-mkdir -p /home/agent/flutter/bin/internal
-for item in /opt/flutter/bin/internal/*; do
-  [ ! -e "$item" ] && continue
-  ln -sfn "$item" "/home/agent/flutter/bin/internal/$(basename "$item")"
-done
+# Copy bin/internal/ (small shell scripts, ~100 KB). These scripts resolve
+# their own real path to find FLUTTER_ROOT — if they were symlinks to
+# /opt/flutter/bin/internal/, they'd compute stamp paths under the read-only
+# /opt/flutter/ tree. Copying makes their real path /home/agent/flutter/
+# so ../cache/engine.stamp resolves to the writable copy.
+cp -r /opt/flutter/bin/internal /home/agent/flutter/bin/internal
 
 # Create bin/cache as a real directory; symlink subdirs, copy files (stamps)
 mkdir -p /home/agent/flutter/bin/cache
