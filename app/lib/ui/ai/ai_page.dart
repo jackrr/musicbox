@@ -99,7 +99,7 @@ class _AiPageState extends ConsumerState<AiPage>
                 padding: const EdgeInsets.all(10),
                 color: Colors.orange.withAlpha(40),
                 child: const Text(
-                  'No API key — go to Settings to add your Anthropic API key.',
+                  'No AI provider configured — go to Settings to add credentials.',
                   style: TextStyle(fontSize: 12, color: Colors.orange),
                   textAlign: TextAlign.center,
                 ),
@@ -136,7 +136,7 @@ class _AiPageState extends ConsumerState<AiPage>
                       onSubmitted: (_) => _send(),
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                       decoration: InputDecoration(
-                        hintText: hasKey ? 'Ask Claude...' : 'Add API key in Settings',
+                        hintText: hasKey ? 'Ask AI...' : 'Configure AI in Settings',
                         hintStyle: const TextStyle(color: Colors.white24),
                         filled: true,
                         fillColor: Colors.white10,
