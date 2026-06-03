@@ -4,7 +4,7 @@
 
 Offline-first mobile music-making app (Flutter + Rust). Integrates with
 [dev-agent-server](https://github.com/jackrr/dev-agent-server) for
-AI-assisted bug fixing via a self-hosted Claude agent.
+AI-assisted bug fixing via a self-hosted LLM agent.
 
 ## Quick reference
 
@@ -43,3 +43,15 @@ Cross-repo contracts are documented in `AGENT_CONTRACTS.md`.
 
 The dev-agent-server runs on **Fedora + rootless Podman + Quadlet/systemd**.
 See `~/projects/dev-agent-server/README.md` for the deploy runbook.
+
+## Server LLM configuration
+
+The dev-agent-server supports multiple LLM providers. Configure which provider
+to use in the server's environment configuration:
+
+- **Anthropic/Claude** (default): Set `ANTHROPIC_API_KEY` 
+- **OpenAI-compatible**: Set `LLM_PROVIDER=openai_compat`, `OPENAI_COMPAT_API_KEY`, and `OPENAI_COMPAT_BASE_URL`
+
+See `~/projects/dev-agent-server/.env.example` for details.
+
+
